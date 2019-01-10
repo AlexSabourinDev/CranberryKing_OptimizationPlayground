@@ -89,8 +89,7 @@ void core_init(void)
                     .attrs = 
                         {
                             [0] = { .name = "sprite", .format = SG_VERTEXFORMAT_FLOAT },
-                            [1] = { .name = "scale", .format = SG_VERTEXFORMAT_FLOAT },
-                            [2] = { .name = "position", .format = SG_VERTEXFORMAT_FLOAT2 }
+                            [1] = { .name = "position", .format = SG_VERTEXFORMAT_SHORT2N }
                         }
                 },
             .shader = shader,
@@ -175,11 +174,11 @@ const char* Render_VS =
     "#version 330\n"
     "uniform float aspect;\n"
     "in float sprite;\n"
-    "in float scale;\n"
     "in vec2 position;\n"
     "out vec2 uv;\n"
     "void main()\n"
     "{\n"
+	"  float scale = sprite < 3.0 ? 0.025 : 2.0 / 500.0;\n"
     "  const float kImageCount = 11.0;\n"
     "  vec2 vertexPos = vec2(gl_VertexID / 2, gl_VertexID & 1);\n"
     "  gl_Position = vec4((position + vertexPos * scale / vec2(aspect, 1.0)), 0.0, 1.0);\n"

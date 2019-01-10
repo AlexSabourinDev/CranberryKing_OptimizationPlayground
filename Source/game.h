@@ -10,8 +10,7 @@ void game_kill(void);
 typedef struct
 {
     float spriteIndex;
-    float scale;
-    float pos[2];
+    int16_t pos[2];
 } Game_Instance;
 
 typedef struct
