@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include "game.h"
 
 #define SOKOL_IMPL
@@ -9,6 +10,9 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "3rd/stb_image.h"
+
+#define MIST_PROFILE_IMPLEMENTATION
+#include "3rd/Mist_Profiler.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -33,6 +37,8 @@ typedef struct
 
 void core_init(void)
 {
+	Mist_ProfileInit();
+
     stm_setup();
 
     sg_desc desc = {0};
@@ -124,20 +130,29 @@ void core_init(void)
 
 void core_frame(void)
 {
+	MIST_PROFILE_BEGIN("Core", "Tick");
     int width = sapp_width();
     int height = sapp_height();
 
     uint64_t delta = stm_laptime(&Time_LastFrame);
+	MIST_PROFILE_BEGIN("Game", "Tick");
     game_tick((float)stm_sec(delta));
+	MIST_PROFILE_END("Game", "Tick");
 
+	MIST_PROFILE_BEGIN("Game", "GenBuffer");
     uint32_t instanceCount = game_gen_instance_buffer(Render_InstanceBuffer);
+	MIST_PROFILE_END("Game", "GenBuffer");
 
+	MIST_PROFILE_BEGIN("Render", "UpdateBuffer");
     sg_update_buffer(Render_DrawState.vertex_buffers[0], Render_InstanceBuffer, sizeof(Game_Instance) * instanceCount);
+	MIST_PROFILE_END("Render", "UpdateBuffer");
 
     sg_pass_action passAction =
     {
         .colors[0] = { .action = SG_ACTION_CLEAR, .val = { 0.1f, 0.1f, 0.1f, 1.0f } }
     };
+
+	MIST_PROFILE_BEGIN("Render", "Pass");
     sg_begin_default_pass(&passAction, (int)width, (int)height);
     sg_apply_draw_state(&Render_DrawState);
     sg_apply_uniform_block(SG_SHADERSTAGE_VS, 0, &(Render_VSParams){.aspect = (float)width / height}, sizeof(Render_VSParams));
@@ -146,7 +161,12 @@ void core_frame(void)
         sg_draw(0, 6, instanceCount);
     }
     sg_end_pass();
+	MIST_PROFILE_END("Render", "Pass");
+
+	MIST_PROFILE_BEGIN("Render", "Commit");
     sg_commit();
+	MIST_PROFILE_END("Render", "Commit");
+	MIST_PROFILE_END("Core", "Tick");
 }
 
 void core_cleanup(void)
@@ -155,6 +175,26 @@ void core_cleanup(void)
     free(Render_InstanceBuffer);
 
     sg_shutdown();
+
+	if (Mist_ProfileListSize() == 0)
+	{
+		// Adds the current buffer to the list of buffers even if it hasn't been filled up yet.
+		Mist_FlushThreadBuffer();
+	}
+
+	FILE* fileHandle = fopen("trace.txt", "w");
+
+	char* print;
+	size_t bufferSize;
+	Mist_FlushAlloc(&print, &bufferSize);
+
+	fprintf(fileHandle, "%s", mist_ProfilePreface);
+	fprintf(fileHandle, "%s", print);
+	fprintf(fileHandle, "%s", mist_ProfilePostface);
+
+	free(print);
+	fclose(fileHandle);
+	Mist_ProfileTerminate();
 }
 
 sapp_desc sokol_main(int argc, char* argv[])

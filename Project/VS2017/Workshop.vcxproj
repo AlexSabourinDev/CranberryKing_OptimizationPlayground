@@ -129,6 +129,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\Source\3rd\Mist_Profiler.h" />
     <ClInclude Include="..\..\Source\3rd\Sokol\sokol_app.h" />
     <ClInclude Include="..\..\Source\3rd\Sokol\sokol_gfx.h" />
     <ClInclude Include="..\..\Source\3rd\Sokol\sokol_time.h" />
