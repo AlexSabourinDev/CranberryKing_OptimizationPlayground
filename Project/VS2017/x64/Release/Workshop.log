@@ -1,8 +1,1 @@
-﻿  game.c
-  main.c
-  Generating code
-  331 of 331 functions (100.0%) were compiled.
-    0 functions were new in current compilation
-    0 functions had inline decision re-evaluated but remain unchanged
-  Finished generating code
-  Workshop.vcxproj -> C:\Users\Alexandre\Desktop\Development\TechSphere_Workshop\Project\VS2017\..\..\Build\x64\Release\Workshop.exe
+﻿  Workshop.vcxproj -> C:\Users\asabourin\Desktop\TechSphere_Workshop\Project\VS2017\..\..\Build\x64\Release\Workshop.exe
