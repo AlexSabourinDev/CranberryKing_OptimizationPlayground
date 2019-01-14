@@ -17,6 +17,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include <xmmintrin.h>
+
 const uint16_t Window_Width = 1024;
 const uint16_t Window_Height = 720;
 const char* Window_Title = "Holy Cheese";
@@ -44,9 +46,15 @@ void core_init(void)
     sg_desc desc = {0};
     sg_setup(&desc);
     
-    sg_buffer instanceBuffer = sg_make_buffer(&(sg_buffer_desc)
+    sg_buffer posInstanceBuffer = sg_make_buffer(&(sg_buffer_desc)
         {
             .size = sizeof(Game_Instance) * GAME_MAX_INSTANCE_COUNT,
+            .usage = SG_USAGE_STREAM
+        });
+
+	sg_buffer indexInstanceBuffer = sg_make_buffer(&(sg_buffer_desc)
+        {
+            .size = sizeof(float) * GAME_MAX_INSTANCE_COUNT,
             .usage = SG_USAGE_STREAM
         });
 
@@ -91,11 +99,12 @@ void core_init(void)
         {
             .layout = 
                 {
-                    .buffers[0] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE, .stride = sizeof(Game_Instance) },
+					.buffers[0] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE,.stride = sizeof(float) },
+					.buffers[1] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE,.stride = sizeof(Game_Instance) },
                     .attrs = 
                         {
-                            [0] = { .name = "sprite", .format = SG_VERTEXFORMAT_FLOAT },
-                            [1] = { .name = "position", .format = SG_VERTEXFORMAT_SHORT2N }
+                            [0] = { .name = "sprite", .format = SG_VERTEXFORMAT_FLOAT, .buffer_index = 0 },
+                            [1] = { .name = "position", .format = SG_VERTEXFORMAT_SHORT2N, .buffer_index = 1 }
                         }
                 },
             .shader = shader,
@@ -119,12 +128,13 @@ void core_init(void)
     Render_DrawState = (sg_draw_state)
         {
             .pipeline = pipeline,
-            .vertex_buffers[0] = instanceBuffer,
+            .vertex_buffers[0] = indexInstanceBuffer,
+			.vertex_buffers[1] = posInstanceBuffer,
             .index_buffer = indexBuffer,
             .fs_images[0] = image
         };
 
-    Render_InstanceBuffer = malloc(sizeof(Game_InstanceBuffer));
+    Render_InstanceBuffer = _mm_malloc(sizeof(Game_InstanceBuffer), 16);
     game_init();
 }
 
@@ -144,7 +154,8 @@ void core_frame(void)
 	MIST_PROFILE_END("Game", "GenBuffer");
 
 	MIST_PROFILE_BEGIN("Render", "UpdateBuffer");
-    sg_update_buffer(Render_DrawState.vertex_buffers[0], Render_InstanceBuffer, sizeof(Game_Instance) * instanceCount);
+	sg_update_buffer(Render_DrawState.vertex_buffers[0], Render_InstanceBuffer->spriteIndices, sizeof(float) * instanceCount);
+	sg_update_buffer(Render_DrawState.vertex_buffers[1], Render_InstanceBuffer->pos, sizeof(Game_Instance) * instanceCount);
 	MIST_PROFILE_END("Render", "UpdateBuffer");
 
     sg_pass_action passAction =
@@ -172,7 +183,7 @@ void core_frame(void)
 void core_cleanup(void)
 {
     game_kill();
-    free(Render_InstanceBuffer);
+    _mm_free(Render_InstanceBuffer);
 
     sg_shutdown();
 
