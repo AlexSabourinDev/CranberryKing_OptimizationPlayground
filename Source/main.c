@@ -145,9 +145,9 @@ void core_frame(void)
     int height = sapp_height();
 
     uint64_t delta = stm_laptime(&Time_LastFrame);
-	MIST_PROFILE_BEGIN("Game", "Tick");
+	MIST_PROFILE_BEGIN("Game", "Game-Tick");
     game_tick((float)stm_sec(delta));
-	MIST_PROFILE_END("Game", "Tick");
+	MIST_PROFILE_END("Game", "Game-Tick");
 
 	MIST_PROFILE_BEGIN("Game", "GenBuffer");
     uint32_t instanceCount = game_gen_instance_buffer(Render_InstanceBuffer);

@@ -20,12 +20,16 @@
 // Random
 uint32_t rand_range(uint32_t min, uint32_t max)
 {
-    return (uint32_t)(((float)rand() / RAND_MAX) * (max - min) + min);
+	uint32_t randMax = (RAND_MAX << 15) | RAND_MAX;
+	uint32_t randVal = (rand() << 15) | rand();
+    return (uint32_t)(((float)randVal / randMax) * (max - min) + min);
 }
 
 float rand_rangef(float min, float max)
 {
-    return ((float)rand() / RAND_MAX) * (max - min) + min;
+	uint32_t randMax = (RAND_MAX << 15) | RAND_MAX;
+	uint32_t randVal = (rand() << 15) | rand();
+    return ((float)randVal / randMax) * (max - min) + min;
 }
 
 // Math
@@ -115,7 +119,6 @@ typedef enum
 
 typedef struct
 {
-    float grown;
     float lifetime;
 } Field_CropHot;
 
@@ -154,8 +157,30 @@ typedef struct
 	uint32_t fieldCrop;
 } Field_TileCold;
 
-const uint32_t Field_Width  = 500;
-const uint32_t Field_Height = 500;
+static uint32_t* SIMD_RemovedIndices = NULL;
+
+const uint32_t SIMD_InvalidMaskTable[] =
+{
+	0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+	0xFFFFFFFF, 0x00, 0x00, 0x00,
+	0xFFFFFFFF, 0xFFFFFFFF, 0x00, 0x00,
+	0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x00
+};
+
+#define MASK_ELEMENT(a) (a) | (a + 1) << (8) | (a + 2) << (16) | (a + 3) << (24)
+#define MASK_GEN(a, b, c, d) MASK_ELEMENT((a * 4)), MASK_ELEMENT((b * 4)), MASK_ELEMENT((c * 4)), MASK_ELEMENT((d * 4))
+const uint32_t SIMD_ShuffleTable[] =
+{
+	MASK_GEN(3, 3, 3, 3), MASK_GEN(0, 3, 3, 3), MASK_GEN(1, 3, 3, 3), MASK_GEN(0, 1, 3, 3),
+	MASK_GEN(2, 3, 3, 3), MASK_GEN(0, 2, 3, 3), MASK_GEN(1, 2, 3, 3), MASK_GEN(0, 1, 2, 3),
+	MASK_GEN(3, 3, 3, 3), MASK_GEN(0, 3, 3, 3), MASK_GEN(1, 3, 3, 3), MASK_GEN(0, 1, 3, 3),
+	MASK_GEN(2, 3, 3, 3), MASK_GEN(0, 2, 3, 3), MASK_GEN(1, 2, 3, 3), MASK_GEN(0, 1, 2, 3)
+};
+
+const uint8_t SIMD_BitCountTable[] = { 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4 };
+
+const uint32_t Field_Width  = 1000;
+const uint32_t Field_Height = 1000;
 static Field_TileCold* Field_TilesCold = NULL;
 static Field_TileGenPos* Field_TilesGenPos = NULL;
 static Field_TileGenStage* Field_TilesGenStage = NULL;
@@ -174,17 +199,40 @@ const uint32_t Crop_MaxCropType = 4;
 void field_tick(float delta)
 {
 	MIST_PROFILE_BEGIN("Game", "Field_Tick");
-    for (uint32_t i = 0; i < Field_CropCount; ++i)
-    {
-        Field_CropHot* crop = &Field_CropsHot[i];
-        crop->lifetime += delta;
+	uint32_t removedIndex = 0;
 
-        if (crop->lifetime >= crop->grown)
-        {
-			Field_CropCold* cropCold = &Field_CropsCold[i];
-            Field_TilesStage[cropCold->fieldTile].stage = FieldStage_Grown;
-			Field_TilesGenStage[cropCold->fieldTile].stage = 3.0f + FieldStage_Grown;
-        }
+	__m128 d = _mm_set_ps1(delta);
+	__m128 z = _mm_set_ps1(0.0f);
+	for (uint32_t i = 0; i < Field_CropCount; i += 4)
+	{
+		__m128 timer = _mm_load_ps((float*)&Field_CropsHot[i]);
+		timer = _mm_sub_ps(timer, d);
+		_mm_store_ps((float*)&Field_CropsHot[i], timer);
+
+		__m128 invalidMask = _mm_load_ps((float*)&SIMD_InvalidMaskTable[(math_min(i + 4, Field_CropCount) % 4) * 4]);
+		__m128 timerDone = _mm_and_ps(_mm_cmple_ps(timer, z), invalidMask);
+
+		int moveMask = _mm_movemask_ps(timerDone);
+		uint8_t bitCount = SIMD_BitCountTable[moveMask];
+
+		if (bitCount > 0)
+		{
+			__m128i shuffleMask = _mm_load_si128((const __m128i*)&SIMD_ShuffleTable[moveMask * 4]);
+			uint32_t indexArray[] = { i, i + 1, i + 2, i + 3 };
+			__m128i indices = _mm_load_si128((const __m128i*)indexArray);
+			indices = _mm_shuffle_epi8(indices, shuffleMask);
+
+			_mm_storeu_si128((__m128i*)&SIMD_RemovedIndices[removedIndex], indices);
+			removedIndex += bitCount;
+		}
+	}
+
+    for (uint32_t i = 0; i < removedIndex; i+=4)
+    {
+		uint32_t index = SIMD_RemovedIndices[i];
+		Field_CropCold* cropCold = &Field_CropsCold[index];
+        Field_TilesStage[cropCold->fieldTile].stage = FieldStage_Grown;
+		Field_TilesGenStage[cropCold->fieldTile].stage = 3.0f + FieldStage_Grown;
     }
 	MIST_PROFILE_END("Game", "Field_Tick");
 }
@@ -259,67 +307,96 @@ static AI_FarmerFarmCold* AI_FarmersFarmCold = NULL;
 static QuantizedVec2* AI_FarmersFarmPos = NULL;
 static uint32_t AI_FarmerFarmCount = 0;
 
-static uint32_t* AI_RemovedIndices = NULL;
-
 uint32_t ai_tick_search(float delta)
 {
 	MIST_PROFILE_BEGIN("Game", "Ai_Search");
-	uint32_t previousMoveCount = AI_FarmerMoveCount;
-	for (uint32_t ai = 0; ai < AI_FarmerSearchCount; ++ai)
+
+	uint32_t removedIndex = 0;
+
+	MIST_PROFILE_BEGIN("Game", "Ai_Search-Timer");
+	__m128 d = _mm_set_ps1(delta);
+	__m128 z = _mm_set_ps1(0.0f);
+	for (uint32_t ai = 0; ai < AI_FarmerSearchCount; ai += 4)
 	{
-		AI_FarmerSearchHot* farmer = &AI_FarmersSearchHot[ai];
-		farmer->searchTimer -= delta;
-		farmer->searchTimer = math_maxf(farmer->searchTimer, 0.0f);
+		__m128 timer = _mm_load_ps((float*)&AI_FarmersSearchHot[ai]);
+		timer = _mm_sub_ps(timer, d);
+		_mm_store_ps((float*)&AI_FarmersSearchHot[ai], timer);
 
-		if (farmer->searchTimer <= 0.0f)
+		__m128 invalidMask = _mm_load_ps((float*)&SIMD_InvalidMaskTable[(math_min(ai + 4, AI_FarmerSearchCount) % 4) * 4]);
+		__m128 timerDone = _mm_and_ps(_mm_cmple_ps(timer, z), invalidMask);
+
+		int moveMask = _mm_movemask_ps(timerDone);
+		uint8_t bitCount = SIMD_BitCountTable[moveMask];
+
+		if (bitCount > 0)
 		{
-			uint32_t tileIndex = rand_range(0U, Field_Width * Field_Height);
-			Field_TileGenPos* tile = &Field_TilesGenPos[tileIndex];
-			Field_TileStage* stage = &Field_TilesStage[tileIndex];
+			__m128i shuffleMask = _mm_load_si128((const __m128i*)&SIMD_ShuffleTable[moveMask * 4]);
+			uint32_t indexArray[] = { ai, ai + 1, ai + 2, ai + 3 };
+			__m128i indices = _mm_load_si128((const __m128i*)indexArray);
+			indices = _mm_shuffle_epi8(indices, shuffleMask);
 
-			if (stage->stage != FieldStage_Planted)
-			{
-				AI_FarmerSearchCold* farmerCold = &AI_FarmersSearchCold[ai];
-
-				uint32_t blockIndex = AI_FarmerMoveCount / 4;
-				uint32_t itemIndex = AI_FarmerMoveCount % 4;
-				AI_FarmerMoveHot* moveFarmerHot = &AI_FarmersMoveHot[blockIndex];
-				AI_FarmerMoveCold* moveFarmerCold = &AI_FarmersMoveCold[AI_FarmerMoveCount];
-				AI_FarmerMovePos* moveFarmerPos = &AI_FarmersMovePos[blockIndex];
-				AI_FarmerMoveCount++;
-				moveFarmerCold->tileIndex = tileIndex;
-				Vec2 farmerPos = quantizedVec2_Read(farmerCold->pos);
-				moveFarmerPos->posX[itemIndex] = farmerPos.x;
-				moveFarmerPos->posY[itemIndex] = farmerPos.y;
-
-				Vec2 tilePos = quantizedVec2_Read(tile->pos);
-				Vec2 vel = vec2_mul(vec2_norm(vec2_sub(tilePos, farmerPos)), AI_FarmerSpeed);
-				moveFarmerHot->velX[itemIndex] = vel.x;
-				moveFarmerHot->velY[itemIndex] = vel.y;
-
-				moveFarmerHot->targetX[itemIndex] = tilePos.x;
-				moveFarmerHot->targetY[itemIndex] = tilePos.y;
-
-				swap(AI_FarmerSearchHot, *farmer, AI_FarmersSearchHot[AI_FarmerSearchCount - 1]);
-				swap(AI_FarmerSearchCold, *farmerCold, AI_FarmersSearchCold[AI_FarmerSearchCount - 1]);
-				AI_FarmerSearchCount--;
-				ai--;
-			}
+			_mm_storeu_si128((__m128i*)&SIMD_RemovedIndices[removedIndex], indices);
+			removedIndex += bitCount;
 		}
 	}
+	MIST_PROFILE_END("Game", "Ai_Search-Timer");
+
+	MIST_PROFILE_BEGIN("Game", "Ai_Search-Find");
+	uint32_t previousMoveCount = AI_FarmerMoveCount;
+	for(uint32_t i = 0; i < removedIndex; ++i)
+	{
+		uint32_t ai = SIMD_RemovedIndices[i];
+
+		uint32_t tileIndex = rand_range(0U, Field_Width * Field_Height);
+		Field_TileGenPos* tile = &Field_TilesGenPos[tileIndex];
+		Field_TileStage* stage = &Field_TilesStage[tileIndex];
+
+		if (stage->stage != FieldStage_Planted)
+		{
+			AI_FarmerSearchHot* farmerHot = &AI_FarmersSearchHot[ai];
+			AI_FarmerSearchCold* farmerCold = &AI_FarmersSearchCold[ai];
+
+			uint32_t blockIndex = AI_FarmerMoveCount / 4;
+			uint32_t itemIndex = AI_FarmerMoveCount % 4;
+			AI_FarmerMoveHot* moveFarmerHot = &AI_FarmersMoveHot[blockIndex];
+			AI_FarmerMoveCold* moveFarmerCold = &AI_FarmersMoveCold[AI_FarmerMoveCount];
+			AI_FarmerMovePos* moveFarmerPos = &AI_FarmersMovePos[blockIndex];
+			AI_FarmerMoveCount++;
+			moveFarmerCold->tileIndex = tileIndex;
+			Vec2 farmerPos = quantizedVec2_Read(farmerCold->pos);
+			moveFarmerPos->posX[itemIndex] = farmerPos.x;
+			moveFarmerPos->posY[itemIndex] = farmerPos.y;
+
+			Vec2 tilePos = quantizedVec2_Read(tile->pos);
+			Vec2 vel = vec2_mul(vec2_norm(vec2_sub(tilePos, farmerPos)), AI_FarmerSpeed);
+			moveFarmerHot->velX[itemIndex] = vel.x;
+			moveFarmerHot->velY[itemIndex] = vel.y;
+
+			moveFarmerHot->targetX[itemIndex] = tilePos.x;
+			moveFarmerHot->targetY[itemIndex] = tilePos.y;
+
+			swap(AI_FarmerSearchHot, *farmerHot, AI_FarmersSearchHot[AI_FarmerSearchCount - 1]);
+			swap(AI_FarmerSearchCold, *farmerCold, AI_FarmersSearchCold[AI_FarmerSearchCount - 1]);
+			AI_FarmerSearchCount--;
+		}
+		else
+		{
+			AI_FarmersSearchHot[ai].searchTimer = rand_rangef(AI_FarmerSearchSpeedMin, AI_FarmerSearchSpeedMax);
+		}
+	}
+	MIST_PROFILE_END("Game", "Ai_Search-Find");
 	MIST_PROFILE_END("Game", "Ai_Search");
 
 	return previousMoveCount;
 }
 
-#define MASK_ELEMENT(a) (a) | (a + 1) << (8) | (a + 2) << (16) | (a + 3) << (24)
-#define MASK_GEN(a, b, c, d) MASK_ELEMENT((a * 4)), MASK_ELEMENT((b * 4)), MASK_ELEMENT((c * 4)), MASK_ELEMENT((d * 4))
 uint32_t ai_tick_move(float delta, uint32_t previousMoveCount)
 {
 	MIST_PROFILE_BEGIN("Game", "Ai_Move");
 
 	uint32_t removeIndex = 0;
 
+	MIST_PROFILE_BEGIN("Game", "Ai_Move-Movement");
 	__m128 d = _mm_load_ps1(&delta);
 	for (uint32_t ai = 0; ai < previousMoveCount; ai += 4)
 	{
@@ -347,44 +424,29 @@ uint32_t ai_tick_move(float delta, uint32_t previousMoveCount)
 		_mm_store_ps(farmerPosInstance->posX, _mm_add_ps(posX, velX));
 		_mm_store_ps(farmerPosInstance->posY, _mm_add_ps(posY, velY));
 
-		const uint32_t invalidMaskTable[] =
-		{
-			0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
-			0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x00,
-			0xFFFFFFFF, 0xFFFFFFFF, 0x00, 0x00,
-			0xFFFFFFFF, 0x00, 0x00, 0x00
-		};
-
-		__m128 invalidMask = _mm_load_ps((float*)&invalidMaskTable[math_min(ai + 4, AI_FarmerMoveCount) % 4 * 4]);
+		__m128 invalidMask = _mm_load_ps((float*)&SIMD_InvalidMaskTable[math_min(ai + 4, previousMoveCount) % 4 * 4]);
 		__m128 cmp = _mm_and_ps(_mm_cmpgt_ps(vMag, dist), invalidMask);
 		int moveMask = _mm_movemask_ps(cmp);
 
-		const uint8_t bitCountTable[] = { 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4 };
-		uint8_t bitCount = bitCountTable[moveMask];
-
-		const uint32_t shuffleTable[] =
-		{
-			MASK_GEN(3, 3, 3, 3), MASK_GEN(0, 3, 3, 3), MASK_GEN(1, 3, 3, 3), MASK_GEN(0, 1, 3, 3), 
-			MASK_GEN(2, 3, 3, 3), MASK_GEN(0, 2, 3, 3), MASK_GEN(1, 2, 3, 3), MASK_GEN(0, 1, 2, 3),
-			MASK_GEN(3, 3, 3, 3), MASK_GEN(0, 3, 3, 3), MASK_GEN(1, 3, 3, 3), MASK_GEN(0, 1, 3, 3),
-			MASK_GEN(2, 3, 3, 3), MASK_GEN(0, 2, 3, 3), MASK_GEN(1, 2, 3, 3), MASK_GEN(0, 1, 2, 3)
-		};
-
-		uint32_t indexArray[] = { ai, ai + 1, ai + 2, ai + 3 };
-		__m128i indices = _mm_load_si128((const __m128i*)indexArray);
-		__m128i removedIndices = _mm_shuffle_epi8(indices, _mm_load_si128((const __m128i*)&shuffleTable[moveMask * 4]));
+		uint8_t bitCount = SIMD_BitCountTable[moveMask];
 
 		if (bitCount > 0)
 		{
-			_mm_storeu_si128((__m128i*)&AI_RemovedIndices[removeIndex], removedIndices);
+			uint32_t indexArray[] = { ai, ai + 1, ai + 2, ai + 3 };
+			__m128i indices = _mm_load_si128((const __m128i*)indexArray);
+			__m128i removedIndices = _mm_shuffle_epi8(indices, _mm_load_si128((const __m128i*)&SIMD_ShuffleTable[moveMask * 4]));
+
+			_mm_storeu_si128((__m128i*)&SIMD_RemovedIndices[removeIndex], removedIndices);
 			removeIndex += bitCount;
 		}
 	}
+	MIST_PROFILE_END("Game", "Ai_Move-Movement");
 
+	MIST_PROFILE_BEGIN("Game", "Ai_Move-Arrived");
 	uint32_t previousFarmCount = AI_FarmerFarmCount;
 	for(uint32_t i = 0; i < removeIndex; ++i)
 	{
-		uint32_t removal = AI_RemovedIndices[i];
+		uint32_t removal = SIMD_RemovedIndices[i];
 		uint32_t blockIndex = removal / 4;
 		uint32_t itemIndex = removal % 4;
 
@@ -419,6 +481,7 @@ uint32_t ai_tick_move(float delta, uint32_t previousMoveCount)
 		swap(AI_FarmerMoveCold, *farmerCold, AI_FarmersMoveCold[AI_FarmerMoveCount - 1]);
 		AI_FarmerMoveCount--;
 	}
+	MIST_PROFILE_END("Game", "Ai_Move-Arrived");
 
 	MIST_PROFILE_END("Game", "Ai_Move");
 	return previousFarmCount;
@@ -427,76 +490,99 @@ uint32_t ai_tick_move(float delta, uint32_t previousMoveCount)
 void ai_tick_farm(float delta, uint32_t previousFarmCount)
 {
 	MIST_PROFILE_BEGIN("Game", "Ai_Farm");
-	for (uint32_t ai = 0; ai < previousFarmCount; ++ai)
+	uint32_t removedIndex = 0;
+
+	MIST_PROFILE_BEGIN("Game", "Ai_Farm-Timer");
+	__m128 d = _mm_set_ps1(delta);
+	__m128 z = _mm_set_ps1(0.0f);
+	for (uint32_t ai = 0; ai < previousFarmCount; ai += 4)
 	{
-		AI_FarmerFarmHot* farmer = &AI_FarmersFarmHot[ai];
+		__m128 timer = _mm_load_ps((float*)&AI_FarmersFarmHot[ai]);
+		timer = _mm_sub_ps(timer, d);
+		_mm_store_ps((float*)&AI_FarmersFarmHot[ai], timer);
 
-		farmer->farmTimer -= delta;
-		if (farmer->farmTimer <= 0.0f)
+		__m128 invalidMask = _mm_load_ps((float*)&SIMD_InvalidMaskTable[(math_min(ai + 4, previousFarmCount) % 4) * 4]);
+		__m128 timerDone = _mm_and_ps(_mm_cmple_ps(timer, z), invalidMask);
+
+		int moveMask = _mm_movemask_ps(timerDone);
+		uint8_t bitCount = SIMD_BitCountTable[moveMask];
+
+		if (bitCount > 0)
 		{
-			AI_FarmerFarmCold* farmerCold = &AI_FarmersFarmCold[ai];
-			Field_TileGenPos* tilePos = &Field_TilesGenPos[farmerCold->tileIndex];
-			Field_TileStage* tileStage = &Field_TilesStage[farmerCold->tileIndex];
-			Field_TileCold* tileCold = &Field_TilesCold[farmerCold->tileIndex];
+			__m128i shuffleMask = _mm_load_si128((const __m128i*)&SIMD_ShuffleTable[moveMask * 4]);
+			uint32_t indexArray[] = { ai, ai + 1, ai + 2, ai + 3 };
+			__m128i indices = _mm_load_si128((const __m128i*)indexArray);
+			indices = _mm_shuffle_epi8(indices, shuffleMask);
 
-			if (tileStage->stage == FieldStage_Grown)
-			{
-				Field_CropHot* crop = &Field_CropsHot[tileCold->fieldCrop];
-				swap(Field_CropHot, *crop, Field_CropsHot[Field_CropCount - 1]);
-
-				Field_CropCold* cropCold = &Field_CropsCold[tileCold->fieldCrop];
-				swap(Field_CropCold, *cropCold, Field_CropsCold[Field_CropCount - 1]);
-
-				Field_CropGenPos* cropGen = &Field_CropsGenPos[tileCold->fieldCrop];
-				swap(Field_CropGenPos, *cropGen, Field_CropsGenPos[Field_CropCount - 1]);
-
-				Field_CropGenType* cropGenType = &Field_CropsGenType[tileCold->fieldCrop];
-				swap(Field_CropGenType, *cropGenType, Field_CropsGenType[Field_CropCount - 1]);
-
-				Field_TilesCold[cropCold->fieldTile].fieldCrop = tileCold->fieldCrop;
-
-				Field_CropCount--;
-			}
-
-			tileStage->stage = math_max((tileStage->stage + 1) % FieldState_Max, FieldStage_Fallow);
-			Field_TilesGenStage[farmerCold->tileIndex].stage = 3.0f + tileStage->stage;
-
-			if (tileStage->stage == FieldStage_Planted)
-			{
-				Field_CropHot* crop = &Field_CropsHot[Field_CropCount];
-				crop->grown = rand_rangef(Crop_MinLifetime, Crop_MaxLifetime);
-
-				Field_CropCold* cropCold = &Field_CropsCold[Field_CropCount];
-				cropCold->fieldTile = farmerCold->tileIndex;
-
-				Field_CropGenType* cropGen = &Field_CropsGenType[Field_CropCount];
-				cropGen->cropType = 7.0f + rand_range(0, Crop_MaxCropType);
-
-				Field_CropGenPos* cropGenPos = &Field_CropsGenPos[Field_CropCount];
-				cropGenPos->pos = tilePos->pos;
-
-				tileCold->fieldCrop = Field_CropCount++;
-			}
-
-			AI_FarmerSearchHot* searchFarmer = &AI_FarmersSearchHot[AI_FarmerSearchCount];
-			AI_FarmerSearchCold* searchFarmerCold = &AI_FarmersSearchCold[AI_FarmerSearchCount];
-			searchFarmer->searchTimer = rand_rangef(AI_FarmerSearchSpeedMin, AI_FarmerSearchSpeedMax);
-			searchFarmerCold->pos = AI_FarmersFarmPos[ai];
-
-			AI_FarmerSearchCount++;
-
-			swap(AI_FarmerFarmHot, *farmer, AI_FarmersFarmHot[previousFarmCount - 1]);
-			swap(AI_FarmerFarmCold, *farmerCold, AI_FarmersFarmCold[previousFarmCount - 1]);
-			swap(QuantizedVec2, AI_FarmersFarmPos[ai], AI_FarmersFarmPos[previousFarmCount - 1]);
-			previousFarmCount--;
-
-			swap(AI_FarmerFarmHot, AI_FarmersFarmHot[previousFarmCount], AI_FarmersFarmHot[AI_FarmerFarmCount - 1]);
-			swap(AI_FarmerFarmCold, AI_FarmersFarmCold[previousFarmCount], AI_FarmersFarmCold[AI_FarmerFarmCount - 1]);
-			swap(QuantizedVec2, AI_FarmersFarmPos[previousFarmCount], AI_FarmersFarmPos[AI_FarmerFarmCount - 1]);
-			AI_FarmerFarmCount--;
-			ai--;
+			_mm_storeu_si128((__m128i*)&SIMD_RemovedIndices[removedIndex], indices);
+			removedIndex += bitCount;
 		}
 	}
+	MIST_PROFILE_END("Game", "Ai_Farm-Timer");
+
+	MIST_PROFILE_BEGIN("Game", "Ai_Farm-Farm");
+	for (uint32_t i = 0; i < removedIndex; ++i)
+	{
+		uint32_t ai = SIMD_RemovedIndices[i];
+
+		AI_FarmerFarmCold* farmerCold = &AI_FarmersFarmCold[ai];
+		Field_TileGenPos* tilePos = &Field_TilesGenPos[farmerCold->tileIndex];
+		Field_TileStage* tileStage = &Field_TilesStage[farmerCold->tileIndex];
+		Field_TileCold* tileCold = &Field_TilesCold[farmerCold->tileIndex];
+
+		if (tileStage->stage == FieldStage_Grown)
+		{
+			Field_CropHot* crop = &Field_CropsHot[tileCold->fieldCrop];
+			swap(Field_CropHot, *crop, Field_CropsHot[Field_CropCount - 1]);
+
+			Field_CropCold* cropCold = &Field_CropsCold[tileCold->fieldCrop];
+			swap(Field_CropCold, *cropCold, Field_CropsCold[Field_CropCount - 1]);
+
+			Field_CropGenPos* cropGen = &Field_CropsGenPos[tileCold->fieldCrop];
+			swap(Field_CropGenPos, *cropGen, Field_CropsGenPos[Field_CropCount - 1]);
+
+			Field_CropGenType* cropGenType = &Field_CropsGenType[tileCold->fieldCrop];
+			swap(Field_CropGenType, *cropGenType, Field_CropsGenType[Field_CropCount - 1]);
+
+			Field_TilesCold[cropCold->fieldTile].fieldCrop = tileCold->fieldCrop;
+
+			Field_CropCount--;
+		}
+
+		tileStage->stage = math_max((tileStage->stage + 1) % FieldState_Max, FieldStage_Fallow);
+		Field_TilesGenStage[farmerCold->tileIndex].stage = 3.0f + tileStage->stage;
+
+		if (tileStage->stage == FieldStage_Planted)
+		{
+			Field_CropHot* crop = &Field_CropsHot[Field_CropCount];
+			crop->lifetime = rand_rangef(Crop_MinLifetime, Crop_MaxLifetime);
+
+			Field_CropCold* cropCold = &Field_CropsCold[Field_CropCount];
+			cropCold->fieldTile = farmerCold->tileIndex;
+
+			Field_CropGenType* cropGen = &Field_CropsGenType[Field_CropCount];
+			cropGen->cropType = 7.0f + rand_range(0, Crop_MaxCropType);
+
+			Field_CropGenPos* cropGenPos = &Field_CropsGenPos[Field_CropCount];
+			cropGenPos->pos = tilePos->pos;
+
+			tileCold->fieldCrop = Field_CropCount++;
+		}
+
+		AI_FarmerSearchHot* searchFarmer = &AI_FarmersSearchHot[AI_FarmerSearchCount];
+		AI_FarmerSearchCold* searchFarmerCold = &AI_FarmersSearchCold[AI_FarmerSearchCount];
+		searchFarmer->searchTimer = rand_rangef(AI_FarmerSearchSpeedMin, AI_FarmerSearchSpeedMax);
+		searchFarmerCold->pos = AI_FarmersFarmPos[ai];
+
+		AI_FarmerSearchCount++;
+
+		swap(AI_FarmerFarmHot, AI_FarmersFarmHot[ai], AI_FarmersFarmHot[AI_FarmerFarmCount - 1]);
+		swap(AI_FarmerFarmCold, AI_FarmersFarmCold[ai], AI_FarmersFarmCold[AI_FarmerFarmCount - 1]);
+		swap(QuantizedVec2, AI_FarmersFarmPos[ai], AI_FarmersFarmPos[AI_FarmerFarmCount - 1]);
+		AI_FarmerFarmCount--;
+	}
+	MIST_PROFILE_END("Game", "Ai_Farm-Farm");
+
 	MIST_PROFILE_END("Game", "Ai_Farm");
 }
 
@@ -536,7 +622,7 @@ void game_init(void)
 	Field_TilesCold = (Field_TileCold*)malloc(sizeof(Field_TileCold) * Field_Width * Field_Height);
 	memset(Field_TilesStage, 0, sizeof(Field_TileStage) * Field_Width * Field_Height);
 
-	Field_CropsHot = (Field_CropHot*)malloc(sizeof(Field_CropHot) * Field_Width * Field_Height);
+	Field_CropsHot = (Field_CropHot*)_mm_malloc(sizeof(Field_CropHot) * Field_Width * Field_Height, 16);
 	Field_CropsCold = (Field_CropCold*)malloc(sizeof(Field_CropCold) * Field_Width * Field_Height);
 	Field_CropsGenPos = (Field_CropGenPos*)_mm_malloc(sizeof(Field_CropGenPos) * Field_Width * Field_Height, 16);
 	Field_CropsGenType = (Field_CropGenType*)_mm_malloc(sizeof(Field_CropGenType) * Field_Width * Field_Height, 16);
@@ -552,16 +638,16 @@ void game_init(void)
         }
     }
 
-    AI_FarmersSearchHot = (AI_FarmerSearchHot*)malloc(sizeof(AI_FarmerSearchHot) * AI_FarmerCount);
+    AI_FarmersSearchHot = (AI_FarmerSearchHot*)_mm_malloc(sizeof(AI_FarmerSearchHot) * AI_FarmerCount, 16);
 	AI_FarmersSearchCold = (AI_FarmerSearchCold*)malloc(sizeof(AI_FarmerSearchCold) * AI_FarmerCount);
 	AI_FarmersMoveHot = (AI_FarmerMoveHot*)_mm_malloc(sizeof(AI_FarmerMoveHot) / 4 * AI_FarmerCount, 16);
 	AI_FarmersMoveCold = (AI_FarmerMoveCold*)malloc(sizeof(AI_FarmerMoveCold) * AI_FarmerCount);
 	AI_FarmersMovePos = (AI_FarmerMovePos*)_mm_malloc(sizeof(AI_FarmerMovePos) / 4 * AI_FarmerCount, 16);
-	AI_FarmersFarmHot = (AI_FarmerFarmHot*)malloc(sizeof(AI_FarmerFarmHot) * AI_FarmerCount);
+	AI_FarmersFarmHot = (AI_FarmerFarmHot*)_mm_malloc(sizeof(AI_FarmerFarmHot) * AI_FarmerCount, 16);
 	AI_FarmersFarmCold = (AI_FarmerFarmCold*)malloc(sizeof(AI_FarmerFarmCold) * AI_FarmerCount);
 	AI_FarmersFarmPos = (QuantizedVec2*)malloc(sizeof(QuantizedVec2) * AI_FarmerCount);
 
-	AI_RemovedIndices = (uint32_t*)_mm_malloc(sizeof(uint32_t) * AI_FarmerCount, 16);
+	SIMD_RemovedIndices = (uint32_t*)_mm_malloc(sizeof(uint32_t) * AI_FarmerCount, 16);
     for (uint32_t ai = 0; ai < AI_FarmerCount; ++ai)
     {
 		AI_FarmerSearchHot* searchFarmer = &AI_FarmersSearchHot[ai];
@@ -581,7 +667,7 @@ void game_tick(float delta)
 
 void game_kill(void)
 {
-	free(Field_CropsHot);
+	_mm_free(Field_CropsHot);
 	Field_CropsHot = NULL;
 	free(Field_CropsCold);
 	Field_CropsCold = NULL;
@@ -597,7 +683,7 @@ void game_kill(void)
 	Field_TilesStage = NULL;
 	free(Field_TilesCold);
 	Field_TilesCold = NULL;
-    free(AI_FarmersSearchHot);
+    _mm_free(AI_FarmersSearchHot);
     AI_FarmersSearchHot = NULL;
 	free(AI_FarmersSearchCold);
 	AI_FarmersSearchCold = NULL;
@@ -607,30 +693,25 @@ void game_kill(void)
 	AI_FarmersMoveCold = NULL;
 	_mm_free(AI_FarmersMovePos);
 	AI_FarmersMovePos = NULL;
-	free(AI_FarmersFarmHot);
+	_mm_free(AI_FarmersFarmHot);
 	AI_FarmersFarmHot = NULL;
 	free(AI_FarmersFarmCold);
 	AI_FarmersFarmCold = NULL;
 	free(AI_FarmersFarmPos);
 	AI_FarmersFarmPos = NULL;
-	_mm_free(AI_RemovedIndices);
-	AI_RemovedIndices = NULL;
+	_mm_free(SIMD_RemovedIndices);
+	SIMD_RemovedIndices = NULL;
 }
 
 uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 {
     uint32_t writeIndex = 0;
-    for (uint32_t i = 0; i < Field_Width * Field_Height; i+=4)
-    {
-        _mm_store_ps(&buffer->spriteIndices[writeIndex + i], _mm_load_ps((float*)&Field_TilesGenStage[i]));
-    }
+	memcpy(&buffer->spriteIndices[writeIndex], Field_TilesGenStage, Field_Width * Field_Height * sizeof(float));
 	memcpy(&buffer->pos[writeIndex], Field_TilesGenPos, Field_Width * Field_Height * sizeof(int16_t) * 2);
 	writeIndex += Field_Width * Field_Height;
 
-	for (uint32_t i = 0; i < Field_CropCount; i += 4)
-	{
-		_mm_store_ps(&buffer->spriteIndices[writeIndex + i], _mm_load_ps((float*)&Field_CropsGenType[i]));
-	}
+
+	memcpy(&buffer->spriteIndices[writeIndex], Field_CropsGenType, Field_CropCount * sizeof(float));
 	memcpy(&buffer->pos[writeIndex], Field_CropsGenPos, Field_CropCount * sizeof(int16_t) * 2);
 	writeIndex += Field_CropCount;
 
