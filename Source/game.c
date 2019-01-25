@@ -716,9 +716,12 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 	writeIndex += Field_CropCount;
 
 	__m128 searchIndex = _mm_set_ps1((float)FarmerState_Search);
-	for (uint32_t i = 0; i < AI_FarmerSearchCount; i += 4)
+	uint32_t writeCount = 4 - writeIndex % 4;
+	// Store the unaligned data to align it.
+	_mm_storeu_ps(&buffer->spriteIndices[writeIndex], searchIndex);
+	for (uint32_t i = writeCount; i < AI_FarmerSearchCount; i += 4)
 	{
-		_mm_storeu_ps(&buffer->spriteIndices[writeIndex + i], searchIndex);
+		_mm_store_ps(&buffer->spriteIndices[writeIndex + i], searchIndex);
 	}
 
 	memcpy(&buffer->pos[writeIndex], AI_FarmersSearchCold, AI_FarmerSearchCount * sizeof(int16_t) * 2);
@@ -750,10 +753,14 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 	}
 	writeIndex += AI_FarmerMoveCount;
 
+
 	__m128 farmIndex = _mm_set_ps1((float)FarmerState_Farm);
-	for (uint32_t i = 0; i < AI_FarmerFarmCount; i += 4)
+	uint32_t farmWriteCount = 4 - writeIndex % 4;
+	// Store the unaligned data to align it.
+	_mm_storeu_ps(&buffer->spriteIndices[writeIndex], searchIndex);
+	for (uint32_t i = farmWriteCount; i < AI_FarmerFarmCount; i += 4)
 	{
-		_mm_storeu_ps(&buffer->spriteIndices[writeIndex + i], farmIndex);
+		_mm_store_ps(&buffer->spriteIndices[writeIndex + i], farmIndex);
 	}
 
 	memcpy(&buffer->pos[writeIndex], AI_FarmersFarmPos, AI_FarmerFarmCount * sizeof(int16_t) * 2);
