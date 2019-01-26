@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#define PROFILE_MODE
+
 void game_init(void);
 void game_tick(float delta);
 void game_kill(void);
