@@ -1,5 +1,5 @@
 ﻿clang-cl.exe : warning : argument unused during compilation: '/GL' [-Wunused-command-line-argument]
-  In file included from ..\..\Source\main.c:7:
+  In file included from ..\..\Source\main.c:8:
 ..\..\Source/3rd/sokol_app.h(793,29): warning : unused function '_sapp_translate_key' [-Wunused-function]
   _SOKOL_PRIVATE sapp_keycode _sapp_translate_key(int scan_code) {
                               ^

@@ -110,7 +110,7 @@ uint32_t math_min(uint32_t l, uint32_t r)
 // Crops
 typedef enum
 {
-    FieldStage_Arable = 0,
+    FieldStage_Arable = 3,
     FieldStage_Fallow,
     FieldStage_Planted,
     FieldStage_Grown,
@@ -145,11 +145,6 @@ typedef struct
 typedef struct
 {
 	float stage;
-} Field_TileGenStage;
-
-typedef struct
-{
-	uint8_t stage;
 } Field_TileStage;
 
 typedef struct
@@ -183,7 +178,6 @@ const uint32_t Field_Width  = 1000;
 const uint32_t Field_Height = 1000;
 static Field_TileCold* Field_TilesCold = NULL;
 static Field_TileGenPos* Field_TilesGenPos = NULL;
-static Field_TileGenStage* Field_TilesGenStage = NULL;
 static Field_TileStage* Field_TilesStage = NULL;
 
 static Field_CropHot* Field_CropsHot = NULL;
@@ -227,12 +221,11 @@ void field_tick(float delta)
 		}
 	}
 
-    for (uint32_t i = 0; i < removedIndex; i+=4)
+    for (uint32_t i = 0; i < removedIndex; i++)
     {
 		uint32_t index = SIMD_RemovedIndices[i];
 		Field_CropCold* cropCold = &Field_CropsCold[index];
         Field_TilesStage[cropCold->fieldTile].stage = FieldStage_Grown;
-		Field_TilesGenStage[cropCold->fieldTile].stage = 3.0f + FieldStage_Grown;
     }
 	MIST_PROFILE_END("Game", "Field_Tick");
 }
@@ -530,7 +523,7 @@ void ai_tick_farm(float delta, uint32_t previousFarmCount)
 		Field_TileStage* tileStage = &Field_TilesStage[farmerCold->tileIndex];
 		Field_TileCold* tileCold = &Field_TilesCold[farmerCold->tileIndex];
 
-		if (tileStage->stage == FieldStage_Grown)
+		if (tileStage->stage == (float)FieldStage_Grown)
 		{
 			Field_CropHot* crop = &Field_CropsHot[tileCold->fieldCrop];
 			swap(Field_CropHot, *crop, Field_CropsHot[Field_CropCount - 1]);
@@ -549,10 +542,9 @@ void ai_tick_farm(float delta, uint32_t previousFarmCount)
 			Field_CropCount--;
 		}
 
-		tileStage->stage = math_max((tileStage->stage + 1) % FieldState_Max, FieldStage_Fallow);
-		Field_TilesGenStage[farmerCold->tileIndex].stage = 3.0f + tileStage->stage;
+		tileStage->stage = math_maxf(fmodf((tileStage->stage + 1.0f), FieldState_Max), FieldStage_Fallow);
 
-		if (tileStage->stage == FieldStage_Planted)
+		if (tileStage->stage == (float)FieldStage_Planted)
 		{
 			Field_CropHot* crop = &Field_CropsHot[Field_CropCount];
 			crop->lifetime = rand_rangef(Crop_MinLifetime, Crop_MaxLifetime);
@@ -597,27 +589,13 @@ void ai_tick(float delta)
 
 // Game
 
-float Game_FarmerImageTable[] =
-    {
-        [FarmerState_Search] = 0.0f,
-        [FarmerState_Move] = 1.0f,
-        [FarmerState_Farm] = 2.0f
-    };
-
-float Game_FieldImageTable[] =
-    {
-        [FieldStage_Arable] = 3.0f,
-        [FieldStage_Fallow] = 4.0f,
-        [FieldStage_Planted] = 5.0f,
-        [FieldStage_Grown] = 6.0f
-    };
-
 void game_init(void)
 {
+#ifndef PROFILE_MODE
     srand((unsigned int)time(NULL));
+#endif // PROFILE_MODE
 
     Field_TilesGenPos = (Field_TileGenPos*)_mm_malloc(sizeof(Field_TileGenPos) * Field_Width * Field_Height, 16);
-	Field_TilesGenStage = (Field_TileGenStage*)_mm_malloc(sizeof(Field_TileGenStage) * Field_Width * Field_Height, 16);
 	Field_TilesStage = (Field_TileStage*)malloc(sizeof(Field_TileStage) * Field_Width * Field_Height);
 	Field_TilesCold = (Field_TileCold*)malloc(sizeof(Field_TileCold) * Field_Width * Field_Height);
 	memset(Field_TilesStage, 0, sizeof(Field_TileStage) * Field_Width * Field_Height);
@@ -634,7 +612,7 @@ void game_init(void)
             Vec2 tilePos = (Vec2) { .x = (float)x / Field_Width, .y = (float)y / Field_Height };
             Field_TilesGenPos[y * Field_Width + x].pos = quantizedVec2_Write(vec2_sub(vec2_mul(tilePos, 2.0f), (Vec2) { .x = 1.0f, .y = 1.0f }));
 
-			Field_TilesGenStage[y * Field_Width + x].stage = 3.0f;
+			Field_TilesStage[y * Field_Width + x].stage = 3.0f;
         }
     }
 
@@ -677,8 +655,6 @@ void game_kill(void)
 	Field_CropsGenType = NULL;
 	_mm_free(Field_TilesGenPos);
 	Field_TilesGenPos = NULL;
-	_mm_free(Field_TilesGenStage);
-	Field_TilesGenStage = NULL;
 	free(Field_TilesStage);
 	Field_TilesStage = NULL;
 	free(Field_TilesCold);
@@ -706,7 +682,7 @@ void game_kill(void)
 uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 {
     uint32_t writeIndex = 0;
-	memcpy(&buffer->spriteIndices[writeIndex], Field_TilesGenStage, Field_Width * Field_Height * sizeof(float));
+	memcpy(&buffer->spriteIndices[writeIndex], Field_TilesStage, Field_Width * Field_Height * sizeof(float));
 	memcpy(&buffer->pos[writeIndex], Field_TilesGenPos, Field_Width * Field_Height * sizeof(int16_t) * 2);
 	writeIndex += Field_Width * Field_Height;
 
