@@ -1,5 +1,7 @@
 #pragma once
 
+#define PROFILE_MODE
+
 #include <stdint.h>
 
 void game_init(void);
