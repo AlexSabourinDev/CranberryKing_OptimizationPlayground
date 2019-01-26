@@ -177,7 +177,7 @@ void core_cleanup(void)
     sg_shutdown();
 }
 
-void core_profileInit()
+void core_profileInit(void)
 {
 	Mist_ProfileInit();
 
@@ -185,7 +185,8 @@ void core_profileInit()
 	game_init();
 }
 
-void core_profileFrame()
+void core_profileCleanup(void);
+void core_profileFrame(void)
 {
 	static int count = 0;
 	// Only run for a constant number of frames instead of a variable number
@@ -206,11 +207,12 @@ void core_profileFrame()
 	}
 	else
 	{
+		core_profileCleanup();
 		exit(0);
 	}
 }
 
-void core_profileCleanup()
+void core_profileCleanup(void)
 {
 	game_kill();
     _mm_free(Render_InstanceBuffer);
