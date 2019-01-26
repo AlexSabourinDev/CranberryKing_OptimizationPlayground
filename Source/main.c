@@ -1,5 +1,4 @@
 #define _CRT_SECURE_NO_WARNINGS
-#define PROFILE_MODE
 #include "game.h"
 
 #define SOKOL_IMPL
