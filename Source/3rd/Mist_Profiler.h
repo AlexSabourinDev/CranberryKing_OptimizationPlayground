@@ -13,6 +13,7 @@ Using Mist_Profiler is simple,
 
 SETUP/TEARDOWN:
 - #define MIST_PROFILE_IMPLEMENTATION before including the header file in one of your source files.
+- #define MIST_PROFILE_ENABLE to enable profiling
 - Mist_ProfileInit(); to init
 - Mist_ProfileTerminate(); to close
 
@@ -33,7 +34,9 @@ A simple way to do this is shown below
 		Mist_FlushThreadBuffer();
 	}
 
-	char* print = Mist_FlushAlloc();
+	char* print;
+	size_t bufferSize;
+	Mist_FlushAlloc(&print, &bufferSize);
 
 	fprintf(fileHandle, "%s", mist_ProfilePreface);
 	fprintf(fileHandle, "%s", print);
@@ -80,9 +83,19 @@ A multithreaded program could have the format:
 #define MIST_PROFILE_TYPE_END 'E'
 #define MIST_PROFILE_TYPE_INSTANT 'I'
 
+#ifdef MIST_PROFILE_ENABLED
+
 #define MIST_PROFILE_BEGIN(cat, name) Mist_WriteProfileSample(Mist_CreateProfileSample(cat, name, Mist_TimeStamp(), MIST_PROFILE_TYPE_BEGIN));
 #define MIST_PROFILE_END(cat, name) Mist_WriteProfileSample(Mist_CreateProfileSample(cat, name, Mist_TimeStamp(), MIST_PROFILE_TYPE_END));
 #define MIST_PROFILE_EVENT(cat, name) Mist_WriteProfileSample(Mist_CreateProfileSample(cat, name, Mist_TimeStamp(), MIST_PROFILE_TYPE_INSTANT));
+
+#else
+
+#define MIST_PROFILE_BEGIN(cat, name)
+#define MIST_PROFILE_END(cat, name)
+#define MIST_PROFILE_EVENT(cat, name)
+
+#endif
 
 typedef struct
 {
@@ -383,7 +396,7 @@ static void Mist_Reverse(char* start, char* end)
 static void Mist_WriteU16(uint16_t val, char* writeBuffer, size_t* writePos)
 {
 	size_t start = *writePos;
-	while (val > 10)
+	while (val >= 10)
 	{
 		// Avoid modulo for debug builds
 		uint16_t t = val / 10;
@@ -398,7 +411,7 @@ static void Mist_WriteU16(uint16_t val, char* writeBuffer, size_t* writePos)
 static void Mist_WriteI64(int64_t val, char* writeBuffer, size_t* writePos)
 {
 	size_t start = *writePos;
-	while (val > 10)
+	while (val >= 10)
 	{
 		// Avoid modulo for debug builds
 		int64_t t = val / 10;

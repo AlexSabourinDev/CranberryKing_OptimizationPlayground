@@ -1,5 +1,6 @@
 #include "game.h"
 
+#define MIST_PROFILE_ENABLED
 #include "3rd/Mist_Profiler.h"
 
 #include <stddef.h>
