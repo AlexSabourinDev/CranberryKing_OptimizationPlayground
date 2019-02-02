@@ -1,7 +1,7 @@
-# Tech Sphere Workshop - Farm Sim 2034
+# Optimization Series
 
 ### Summary
-A small farming simulator for Tech Sphere January 2019. The workshop will focus on optimizing the program as much as possible within the span of 3 hours. Feel free to optimize and have fun!
+A small farming simulator that will be the target of a series of optimization blog posts at [https://alexsabourindev.wordpress.com/category/optimization-series/](https://alexsabourindev.wordpress.com/category/optimization-series/) The goal will be to optimize the program from 56ms to less than 16ms per tick!
 
 ### Requirements
 - C99
