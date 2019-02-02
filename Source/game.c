@@ -145,6 +145,7 @@ typedef struct
 		struct
 		{
 			Vec2 vel;
+			Vec2 tilePos;
 			Field_Tile* tile;
 		} moveState;
 
@@ -194,6 +195,7 @@ void ai_tick(float delta)
 				{
 					farmer->state = FarmerState_Move;
 					farmer->moveState.tile = tile;
+					farmer->moveState.tilePos = tile->pos;
 
 					farmer->moveState.vel = vec2_mul(vec2_norm(vec2_sub(tile->pos, farmer->pos)), AI_FarmerSpeed);
 				}
@@ -207,15 +209,16 @@ void ai_tick(float delta)
 		}
 		case FarmerState_Move:
 		{
-			Field_Tile* tile = farmer->moveState.tile;
-			float currentDist = vec2_mag(vec2_sub(tile->pos, farmer->pos));
+			Vec2 tilePos = farmer->moveState.tilePos;
+			float currentDist = vec2_mag(vec2_sub(tilePos, farmer->pos));
 			Vec2 vel = vec2_mul(farmer->moveState.vel, delta);
 			vel = vec2_mul(vec2_norm(vel), math_minf(vec2_mag(vel), currentDist));
 			farmer->pos = vec2_add(farmer->pos, vel);
 
-			float dist = vec2_mag(vec2_sub(tile->pos, farmer->pos));
+			float dist = vec2_mag(vec2_sub(tilePos, farmer->pos));
 			if (dist < AI_FarmerCropRadius)
 			{
+				Field_Tile* tile = farmer->moveState.tile;
 				farmer->state = FarmerState_Farm;
 				farmer->farmState.farmTimer = rand_rangef(AI_FarmerFarmSpeedMin, AI_FarmerFarmSpeedMax);
 				farmer->farmState.tile = tile;
