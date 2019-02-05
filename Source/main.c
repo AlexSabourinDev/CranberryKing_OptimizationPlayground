@@ -183,7 +183,7 @@ void core_cleanupProfile(void);
 static uint32_t profile_FrameCount = 0;
 void core_frameProfile(void)
 {
-	if (profile_FrameCount < 500)
+	if (profile_FrameCount < 1000)
 	{
 		MIST_PROFILE_BEGIN("Core", "Tick");
 		game_tick(0.016f);
