@@ -1,6 +1,6 @@
 #include "game.h"
 
-#define MIST_PROFILE_ENABLED
+// #define MIST_PROFILE_ENABLED
 #include "3rd/Mist_Profiler.h"
 
 #include <stddef.h>
@@ -134,7 +134,6 @@ void field_tick(float delta)
 typedef struct
 {
 	Vec2 pos;
-	Vec2 vel;
 	Vec2 tilePos;
 } AI_FarmerMoveStateHot;
 
@@ -211,8 +210,6 @@ void ai_tick(float delta)
 					moveFarmerHot->tilePos = tile->pos;
 					moveFarmerHot->pos = coldFarmer->pos;
 
-					moveFarmerHot->vel = vec2_mul(vec2_norm(vec2_sub(tile->pos, coldFarmer->pos)), AI_FarmerSpeed);
-
 					SWAP(AI_FarmerSearchStateHot, *farmer, AI_FarmersSearchHot[AI_FarmerSearchCount - 1]);
 					SWAP(AI_FarmerSearchStateCold, *coldFarmer, AI_FarmersSearchCold[AI_FarmerSearchCount - 1]);
 					AI_FarmerSearchCount--;
@@ -233,14 +230,18 @@ void ai_tick(float delta)
 			AI_FarmerMoveStateHot* farmer = &AI_FarmersMoveHot[i];
 
 			Vec2 tilePos = farmer->tilePos;
-			float currentDist = vec2_mag(vec2_sub(tilePos, farmer->pos));
-			Vec2 vel = vec2_mul(farmer->vel, delta);
-			vel = vec2_mul(vec2_norm(vel), math_minf(vec2_mag(vel), currentDist));
+
+			float velMag = AI_FarmerSpeed * delta;
+			Vec2 dirVec = vec2_sub(tilePos, farmer->pos);
+			float mag = vec2_mag(dirVec);
+
+			Vec2 vel = vec2_mul(dirVec, (1.0f / mag) * velMag);
 			farmer->pos = vec2_add(farmer->pos, vel);
 
-			float dist = vec2_mag(vec2_sub(tilePos, farmer->pos));
-			if (dist < AI_FarmerCropRadius)
+			if (velMag > mag)
 			{
+				farmer->pos = farmer->tilePos;
+
 				AI_FarmerMoveStateCold* coldFarmer = &AI_FarmersMoveCold[i];
 				Field_Tile* tile = coldFarmer->tile;
 
