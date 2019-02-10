@@ -104,6 +104,23 @@ typedef struct
 	Vec2 pos;
 } Field_Tile;
 
+typedef struct
+{
+	uint32_t writeIndex;
+	float spriteIndex;
+} Field_TileDrawCommand;
+
+float Field_ImageTable[] =
+{
+	[FieldStage_Arable] = 3.0f,
+	[FieldStage_Fallow] = 4.0f,
+	[FieldStage_Planted] = 5.0f,
+	[FieldStage_Grown] = 6.0f
+};
+
+static uint32_t Field_TileDrawCommandCount = 0;
+static Field_TileDrawCommand* Field_TileDrawCommands = NULL;
+
 const uint32_t Field_Width = 1000;
 const uint32_t Field_Height = 1000;
 static Field_Tile* Field_Tiles = NULL;
@@ -125,6 +142,13 @@ void field_tick(float delta)
 		{
 			Field_Tile* tile = &Field_Tiles[crop->tileIndex];
 			tile->stage = FieldStage_Grown;
+
+			Field_TileDrawCommands[Field_TileDrawCommandCount] = (Field_TileDrawCommand)
+				{
+					.writeIndex = crop->tileIndex,
+					.spriteIndex = Field_ImageTable[FieldStage_Grown]
+				};
+			Field_TileDrawCommandCount++;
 
 			SWAP(Field_Crop, *crop, Field_Crops[Field_CropCount - 1]);
 			Field_CropCount--;
@@ -279,6 +303,13 @@ void ai_tick(float delta)
 				Field_Tile* tile = &Field_Tiles[coldFarmer->tileIndex];
 				tile->stage = math_max((tile->stage + 1) % FieldState_Max, FieldStage_Fallow);
 
+				Field_TileDrawCommands[Field_TileDrawCommandCount] = (Field_TileDrawCommand)
+					{
+						.writeIndex = coldFarmer->tileIndex,
+						.spriteIndex = Field_ImageTable[tile->stage]
+					};
+				Field_TileDrawCommandCount++;
+
 				if (tile->stage == FieldStage_Planted)
 				{
 					Field_Crop* crop = &Field_Crops[Field_CropCount++];
@@ -313,15 +344,7 @@ const float FarmerState_Search = 0.0f;
 const float FarmerState_Move = 1.0f;
 const float FarmerState_Farm = 2.0f;
 
-float Game_FieldImageTable[] =
-{
-	[FieldStage_Arable] = 3.0f,
-	[FieldStage_Fallow] = 4.0f,
-	[FieldStage_Planted] = 5.0f,
-	[FieldStage_Grown] = 6.0f
-};
-
-void game_init(void)
+void game_init(Game_InstanceBuffer* buffer)
 {
 	MIST_PROFILE_BEGIN("Game", "Game-Init");
 
@@ -331,6 +354,7 @@ void game_init(void)
 
 	Field_Tiles = (Field_Tile*)malloc(sizeof(Field_Tile) * Field_Width * Field_Height);
 	memset(Field_Tiles, 0, sizeof(Field_Tile) * Field_Width * Field_Height);
+	Field_TileDrawCommands = (Field_TileDrawCommand*)malloc(sizeof(Field_TileDrawCommand) * Field_Width * Field_Height);
 
 	Field_Crops = (Field_Crop*)malloc(sizeof(Field_Crop) * Field_Width * Field_Height);
 
@@ -338,8 +362,14 @@ void game_init(void)
 	{
 		for (uint32_t x = 0; x < Field_Width; ++x)
 		{
-			Field_Tiles[y * Field_Width + x].pos = (Vec2) { .x = (float)x / Field_Width, .y = (float)y / Field_Height };
-			Field_Tiles[y * Field_Width + x].pos = vec2_sub(vec2_mul(Field_Tiles[y * Field_Width + x].pos, 2.0f), (Vec2) { .x = 1.0f, .y = 1.0f });
+			uint32_t writeLoc = y * Field_Width + x;
+			Field_Tiles[writeLoc].pos = (Vec2) { .x = (float)x / Field_Width, .y = (float)y / Field_Height };
+			Field_Tiles[writeLoc].pos = vec2_sub(vec2_mul(Field_Tiles[writeLoc].pos, 2.0f), (Vec2) { .x = 1.0f, .y = 1.0f });
+
+			buffer->instances[writeLoc].spriteIndex = Field_ImageTable[0];
+			buffer->instances[writeLoc].scale = 2.0f / Field_Width;
+			buffer->instances[writeLoc].pos[0] = Field_Tiles[writeLoc].pos.x;
+			buffer->instances[writeLoc].pos[1] = Field_Tiles[writeLoc].pos.y;
 		}
 	}
 
@@ -383,6 +413,9 @@ void game_kill(void)
 	free(Field_Tiles);
 	Field_Tiles = NULL;
 
+	free(Field_TileDrawCommands);
+	Field_TileDrawCommands = NULL;
+
 	free(AI_FarmersMoveHot);
 	AI_FarmersMoveHot = NULL;
 	free(AI_FarmersMoveCold);
@@ -405,16 +438,14 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 {
 	MIST_PROFILE_BEGIN("Game", "Game-GenInstanceBuffer");
 
-	uint32_t writeIndex = 0;
-	for (uint32_t i = 0; i < Field_Width * Field_Height; ++i)
+	for (uint32_t i = 0; i < Field_TileDrawCommandCount; ++i)
 	{
-		uint32_t writeLoc = writeIndex++;
-		buffer->instances[writeLoc].spriteIndex = Game_FieldImageTable[Field_Tiles[i].stage];
-		buffer->instances[writeLoc].scale = 2.0f / Field_Width;
-		buffer->instances[writeLoc].pos[0] = Field_Tiles[i].pos.x;
-		buffer->instances[writeLoc].pos[1] = Field_Tiles[i].pos.y;
+		Field_TileDrawCommand* command = &Field_TileDrawCommands[i];
+		buffer->instances[command->writeIndex].spriteIndex = command->spriteIndex;
 	}
+	Field_TileDrawCommandCount = 0;
 
+	uint32_t writeIndex = Field_Width * Field_Height;
 	for (uint32_t i = 0; i < Field_CropCount; i++)
 	{
 		uint32_t cropWriteIndex = writeIndex++;

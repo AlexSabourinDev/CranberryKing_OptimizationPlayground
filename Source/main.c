@@ -127,7 +127,7 @@ void core_init(void)
 	};
 
 	Render_InstanceBuffer = malloc(sizeof(Game_InstanceBuffer));
-	game_init();
+	game_init(Render_InstanceBuffer);
 }
 
 void core_frame(void)
@@ -174,7 +174,7 @@ void core_initProfile(void)
 
 	MIST_PROFILE_BEGIN("Core", "Init");
 	Render_InstanceBuffer = malloc(sizeof(Game_InstanceBuffer));
-	game_init();
+	game_init(Render_InstanceBuffer);
 	MIST_PROFILE_END("Core", "Init");
 }
 
