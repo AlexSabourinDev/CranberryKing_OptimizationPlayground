@@ -95,6 +95,16 @@ typedef struct
 	Vec2 pos;
 } Field_Crop;
 
+typedef struct
+{
+	uint32_t writeIndex;
+	float spriteIndex;
+	Vec2 pos;
+} Field_CropDrawCommand;
+
+static uint32_t Field_CropDrawCommandCount = 0;
+static Field_CropDrawCommand* Field_CropDrawCommands = NULL;
+
 static uint32_t Field_CropCount = 0;
 static Field_Crop* Field_Crops = NULL;
 
@@ -152,6 +162,15 @@ void field_tick(float delta)
 
 			SWAP(Field_Crop, *crop, Field_Crops[Field_CropCount - 1]);
 			Field_CropCount--;
+
+			Field_CropDrawCommands[Field_CropDrawCommandCount] = (Field_CropDrawCommand)
+				{
+					.writeIndex = i,
+					.spriteIndex = 7.0f + crop->cropType,
+					.pos = crop->pos
+				};
+			Field_CropDrawCommandCount++;
+
 			i--;
 		}
 	}
@@ -312,12 +331,22 @@ void ai_tick(float delta)
 
 				if (tile->stage == FieldStage_Planted)
 				{
-					Field_Crop* crop = &Field_Crops[Field_CropCount++];
+					Field_Crop* crop = &Field_Crops[Field_CropCount];
 					crop->grown = rand_rangef(Crop_MinLifetime, Crop_MaxLifetime);
 					crop->lifetime = 0.0f;
 					crop->cropType = rand_range(0, Crop_MaxCropType);
 					crop->tileIndex = coldFarmer->tileIndex;
 					crop->pos = tile->pos;
+
+					Field_CropDrawCommands[Field_CropDrawCommandCount] = (Field_CropDrawCommand)
+						{
+							.writeIndex = Field_CropCount,
+							.spriteIndex = 7.0f + crop->cropType,
+							.pos = crop->pos
+						};
+					Field_CropDrawCommandCount++;
+
+					Field_CropCount++;
 				}
 
 				AI_FarmerSearchStateHot* searchFarmerHot = &AI_FarmersSearchHot[AI_FarmerSearchCount];
@@ -357,6 +386,7 @@ void game_init(Game_InstanceBuffer* buffer)
 	Field_TileDrawCommands = (Field_TileDrawCommand*)malloc(sizeof(Field_TileDrawCommand) * Field_Width * Field_Height);
 
 	Field_Crops = (Field_Crop*)malloc(sizeof(Field_Crop) * Field_Width * Field_Height);
+	Field_CropDrawCommands = (Field_CropDrawCommand*)malloc(sizeof(Field_CropDrawCommand) * Field_Width * Field_Height);
 
 	for (uint32_t y = 0; y < Field_Height; ++y)
 	{
@@ -410,6 +440,9 @@ void game_kill(void)
 	free(Field_Crops);
 	Field_Crops = NULL;
 
+	free(Field_CropDrawCommands);
+	Field_CropDrawCommands = NULL;
+
 	free(Field_Tiles);
 	Field_Tiles = NULL;
 
@@ -445,15 +478,17 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 	}
 	Field_TileDrawCommandCount = 0;
 
-	uint32_t writeIndex = Field_Width * Field_Height;
-	for (uint32_t i = 0; i < Field_CropCount; i++)
+	for (uint32_t i = 0; i < Field_CropDrawCommandCount; i++)
 	{
-		uint32_t cropWriteIndex = writeIndex++;
-		buffer->instances[cropWriteIndex].spriteIndex = 7.0f + Field_Crops[i].cropType;
-		buffer->instances[cropWriteIndex].scale = 2.0f / Field_Width;
-		buffer->instances[cropWriteIndex].pos[0] = Field_Crops[i].pos.x;
-		buffer->instances[cropWriteIndex].pos[1] = Field_Crops[i].pos.y;
+		Field_CropDrawCommand* command = &Field_CropDrawCommands[i];
+		buffer->instances[command->writeIndex].spriteIndex = command->spriteIndex;
+		buffer->instances[command->writeIndex].scale = 2.0f / Field_Width;
+		buffer->instances[command->writeIndex].pos[0] = command->pos.x;
+		buffer->instances[command->writeIndex].pos[1] = command->pos.y;
 	}
+	Field_CropDrawCommandCount = 0;
+
+	uint32_t writeIndex = Field_Width * Field_Height + Field_CropCount;
 
 	for (uint32_t i = 0; i < AI_FarmerSearchCount; ++i)
 	{
