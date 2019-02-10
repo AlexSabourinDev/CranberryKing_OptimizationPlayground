@@ -92,6 +92,7 @@ typedef struct
 	float lifetime;
 	uint32_t cropType;
 	uint32_t tileIndex;
+	Vec2 pos;
 } Field_Crop;
 
 static uint32_t Field_CropCount = 0;
@@ -285,6 +286,7 @@ void ai_tick(float delta)
 					crop->lifetime = 0.0f;
 					crop->cropType = rand_range(0, Crop_MaxCropType);
 					crop->tileIndex = coldFarmer->tileIndex;
+					crop->pos = tile->pos;
 				}
 
 				AI_FarmerSearchStateHot* searchFarmerHot = &AI_FarmersSearchHot[AI_FarmerSearchCount];
@@ -411,12 +413,15 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 		buffer->instances[writeLoc].scale = 2.0f / Field_Width;
 		buffer->instances[writeLoc].pos[0] = Field_Tiles[i].pos.x;
 		buffer->instances[writeLoc].pos[1] = Field_Tiles[i].pos.y;
+	}
 
+	for (uint32_t i = 0; i < Field_CropCount; i++)
+	{
 		uint32_t cropWriteIndex = writeIndex++;
 		buffer->instances[cropWriteIndex].spriteIndex = 7.0f + Field_Crops[i].cropType;
 		buffer->instances[cropWriteIndex].scale = 2.0f / Field_Width;
-		buffer->instances[cropWriteIndex].pos[0] = Field_Tiles[i].pos.x;
-		buffer->instances[cropWriteIndex].pos[1] = Field_Tiles[i].pos.y;
+		buffer->instances[cropWriteIndex].pos[0] = Field_Crops[i].pos.x;
+		buffer->instances[cropWriteIndex].pos[1] = Field_Crops[i].pos.y;
 	}
 
 	for (uint32_t i = 0; i < AI_FarmerSearchCount; ++i)
