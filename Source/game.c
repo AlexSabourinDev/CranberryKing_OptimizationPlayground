@@ -1,6 +1,6 @@
 #include "game.h"
 
-// #define MIST_PROFILE_ENABLED
+#define MIST_PROFILE_ENABLED
 #include "3rd/Mist_Profiler.h"
 
 #include <stddef.h>
@@ -91,11 +91,14 @@ typedef struct
 	float grown;
 	float lifetime;
 	uint32_t cropType;
+	uint32_t tileIndex;
 } Field_Crop;
+
+static uint32_t Field_CropCount = 0;
+static Field_Crop* Field_Crops = NULL;
 
 typedef struct
 {
-	Field_Crop* crop;
 	Field_Stage stage;
 	Vec2 pos;
 } Field_Tile;
@@ -112,17 +115,19 @@ void field_tick(float delta)
 {
 	MIST_PROFILE_BEGIN("Game", "Field-Tick");
 
-	for (uint32_t i = 0; i < Field_Width * Field_Height; ++i)
+	for (uint32_t i = 0; i < Field_CropCount; ++i)
 	{
-		if (Field_Tiles[i].stage == FieldStage_Planted)
-		{
-			Field_Crop* crop = Field_Tiles[i].crop;
-			crop->lifetime += delta;
+		Field_Crop* crop = &Field_Crops[i];
+		crop->lifetime += delta;
 
-			if (crop->lifetime >= crop->grown)
-			{
-				Field_Tiles[i].stage = FieldStage_Grown;
-			}
+		if (crop->lifetime >= crop->grown)
+		{
+			Field_Tile* tile = &Field_Tiles[crop->tileIndex];
+			tile->stage = FieldStage_Grown;
+
+			SWAP(Field_Crop, *crop, Field_Crops[Field_CropCount - 1]);
+			Field_CropCount--;
+			i--;
 		}
 	}
 	MIST_PROFILE_END("Game", "Field-Tick");
@@ -139,7 +144,7 @@ typedef struct
 
 typedef struct
 {
-	Field_Tile* tile;
+	uint32_t tileIndex;
 } AI_FarmerMoveStateCold;
 
 typedef struct
@@ -150,7 +155,7 @@ typedef struct
 typedef struct
 {
 	Vec2 pos;
-	Field_Tile* tile;
+	uint32_t tileIndex;
 } AI_FarmerFarmStateCold;
 
 typedef struct
@@ -206,13 +211,14 @@ void ai_tick(float delta)
 					AI_FarmerMoveStateHot* moveFarmerHot = &AI_FarmersMoveHot[AI_FarmerMoveCount];
 					AI_FarmerMoveStateCold* moveFarmerCold = &AI_FarmersMoveCold[AI_FarmerMoveCount];
 					AI_FarmerMoveCount++;
-					moveFarmerCold->tile = tile;
+					moveFarmerCold->tileIndex = tileIndex;
 					moveFarmerHot->tilePos = tile->pos;
 					moveFarmerHot->pos = coldFarmer->pos;
 
 					SWAP(AI_FarmerSearchStateHot, *farmer, AI_FarmersSearchHot[AI_FarmerSearchCount - 1]);
 					SWAP(AI_FarmerSearchStateCold, *coldFarmer, AI_FarmersSearchCold[AI_FarmerSearchCount - 1]);
 					AI_FarmerSearchCount--;
+					i--;
 				}
 				else
 				{
@@ -243,18 +249,18 @@ void ai_tick(float delta)
 				farmer->pos = farmer->tilePos;
 
 				AI_FarmerMoveStateCold* coldFarmer = &AI_FarmersMoveCold[i];
-				Field_Tile* tile = coldFarmer->tile;
 
 				AI_FarmerFarmStateHot* farmFarmerHot = &AI_FarmersFarmHot[AI_FarmerFarmCount];
 				AI_FarmerFarmStateCold* farmFarmerCold = &AI_FarmersFarmCold[AI_FarmerFarmCount];
 				AI_FarmerFarmCount++;
 				farmFarmerHot->farmTimer = rand_rangef(AI_FarmerFarmSpeedMin, AI_FarmerFarmSpeedMax);
-				farmFarmerCold->tile = tile;
+				farmFarmerCold->tileIndex = coldFarmer->tileIndex;
 				farmFarmerCold->pos = farmer->pos;
 
 				SWAP(AI_FarmerMoveStateHot, *farmer, AI_FarmersMoveHot[AI_FarmerMoveCount - 1]);
 				SWAP(AI_FarmerMoveStateCold, *coldFarmer, AI_FarmersMoveCold[AI_FarmerMoveCount - 1]);
 				AI_FarmerMoveCount--;
+				i--;
 			}
 		}
 	}
@@ -269,21 +275,16 @@ void ai_tick(float delta)
 			if (farmer->farmTimer <= 0.0f)
 			{
 				AI_FarmerFarmStateCold* coldFarmer = &AI_FarmersFarmCold[i];
-				Field_Tile* tile = coldFarmer->tile;
-
-				if (tile->stage == FieldStage_Grown)
-				{
-					free(tile->crop);
-					tile->crop = NULL;
-				}
-
+				Field_Tile* tile = &Field_Tiles[coldFarmer->tileIndex];
 				tile->stage = math_max((tile->stage + 1) % FieldState_Max, FieldStage_Fallow);
 
 				if (tile->stage == FieldStage_Planted)
 				{
-					tile->crop = (Field_Crop*)malloc(sizeof(Field_Crop));
-					tile->crop->grown = rand_rangef(Crop_MinLifetime, Crop_MaxLifetime);
-					tile->crop->cropType = rand_range(0, Crop_MaxCropType);
+					Field_Crop* crop = &Field_Crops[Field_CropCount++];
+					crop->grown = rand_rangef(Crop_MinLifetime, Crop_MaxLifetime);
+					crop->lifetime = 0.0f;
+					crop->cropType = rand_range(0, Crop_MaxCropType);
+					crop->tileIndex = coldFarmer->tileIndex;
 				}
 
 				AI_FarmerSearchStateHot* searchFarmerHot = &AI_FarmersSearchHot[AI_FarmerSearchCount];
@@ -296,6 +297,7 @@ void ai_tick(float delta)
 				SWAP(AI_FarmerFarmStateHot, *farmer, AI_FarmersFarmHot[AI_FarmerFarmCount - 1]);
 				SWAP(AI_FarmerFarmStateCold, *coldFarmer, AI_FarmersFarmCold[AI_FarmerFarmCount - 1]);
 				AI_FarmerFarmCount--;
+				i--;
 			}
 		}
 	}
@@ -327,6 +329,8 @@ void game_init(void)
 
 	Field_Tiles = (Field_Tile*)malloc(sizeof(Field_Tile) * Field_Width * Field_Height);
 	memset(Field_Tiles, 0, sizeof(Field_Tile) * Field_Width * Field_Height);
+
+	Field_Crops = (Field_Crop*)malloc(sizeof(Field_Crop) * Field_Width * Field_Height);
 
 	for (uint32_t y = 0; y < Field_Height; ++y)
 	{
@@ -371,11 +375,8 @@ void game_kill(void)
 {
 	MIST_PROFILE_BEGIN("Game", "Game-Kill");
 
-	for (uint32_t i = 0; i < Field_Width * Field_Height; ++i)
-	{
-		free(Field_Tiles[i].crop);
-		Field_Tiles[i].crop = NULL;
-	}
+	free(Field_Crops);
+	Field_Crops = NULL;
 
 	free(Field_Tiles);
 	Field_Tiles = NULL;
@@ -411,15 +412,11 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 		buffer->instances[writeLoc].pos[0] = Field_Tiles[i].pos.x;
 		buffer->instances[writeLoc].pos[1] = Field_Tiles[i].pos.y;
 
-		if (Field_Tiles[i].crop != NULL)
-		{
-			uint32_t cropWriteIndex = writeIndex++;
-			buffer->instances[cropWriteIndex].spriteIndex = 7.0f + Field_Tiles[i].crop->cropType;
-			buffer->instances[cropWriteIndex].scale = 2.0f / Field_Width;
-
-			buffer->instances[cropWriteIndex].pos[0] = Field_Tiles[i].pos.x;
-			buffer->instances[cropWriteIndex].pos[1] = Field_Tiles[i].pos.y;
-		}
+		uint32_t cropWriteIndex = writeIndex++;
+		buffer->instances[cropWriteIndex].spriteIndex = 7.0f + Field_Crops[i].cropType;
+		buffer->instances[cropWriteIndex].scale = 2.0f / Field_Width;
+		buffer->instances[cropWriteIndex].pos[0] = Field_Tiles[i].pos.x;
+		buffer->instances[cropWriteIndex].pos[1] = Field_Tiles[i].pos.y;
 	}
 
 	for (uint32_t i = 0; i < AI_FarmerSearchCount; ++i)
