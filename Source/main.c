@@ -47,7 +47,7 @@ void core_init(void)
 
 	sg_buffer instanceBuffer = sg_make_buffer(&(sg_buffer_desc)
 	{
-		.size = sizeof(Game_Instance) * GAME_MAX_INSTANCE_COUNT,
+		.size = sizeof(float) * GAME_MAX_INSTANCE_COUNT * 4,
 			.usage = SG_USAGE_STREAM
 	});
 
@@ -92,12 +92,12 @@ void core_init(void)
 	{
 		.layout =
 		{
-			.buffers[0] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE,.stride = sizeof(Game_Instance) },
+			.buffers[0] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE,.stride = sizeof(float) * 4 },
 			.attrs =
 				{
-					[0] = {.name = "sprite",.format = SG_VERTEXFORMAT_FLOAT },
-					[1] = {.name = "scale",.format = SG_VERTEXFORMAT_FLOAT },
-					[2] = {.name = "position",.format = SG_VERTEXFORMAT_FLOAT2 }
+					[0] = {.name = "sprite",.format = SG_VERTEXFORMAT_FLOAT, .offset = offsetof(Game_InstanceBuffer, spriteIndices) },
+					[1] = {.name = "scale",.format = SG_VERTEXFORMAT_FLOAT, .offset = offsetof(Game_InstanceBuffer, scales) },
+					[2] = {.name = "position",.format = SG_VERTEXFORMAT_FLOAT2, .offset = offsetof(Game_InstanceBuffer, positions) }
 				}
 		},
 			.shader = shader,
@@ -140,7 +140,7 @@ void core_frame(void)
 
 	uint32_t instanceCount = game_gen_instance_buffer(Render_InstanceBuffer);
 
-	sg_update_buffer(Render_DrawState.vertex_buffers[0], Render_InstanceBuffer, sizeof(Game_Instance) * instanceCount);
+	sg_update_buffer(Render_DrawState.vertex_buffers[0], Render_InstanceBuffer, sizeof(float) * instanceCount * 4);
 
 	sg_pass_action passAction =
 	{

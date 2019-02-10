@@ -5,16 +5,12 @@
 #define PROFILE_MODE
 
 #define GAME_MAX_INSTANCE_COUNT 50000000
-typedef struct
-{
-	float spriteIndex;
-	float scale;
-	float pos[2];
-} Game_Instance;
 
 typedef struct
 {
-	Game_Instance instances[GAME_MAX_INSTANCE_COUNT];
+	float spriteIndices[GAME_MAX_INSTANCE_COUNT];
+	float scales[GAME_MAX_INSTANCE_COUNT];
+	float positions[GAME_MAX_INSTANCE_COUNT * 2];
 } Game_InstanceBuffer;
 
 void game_init(Game_InstanceBuffer* buffer);
