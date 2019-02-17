@@ -98,7 +98,7 @@ typedef struct
 typedef struct
 {
 	uint32_t writeIndex;
-	float spriteIndex;
+	int16_t spriteIndex;
 	Vec2 pos;
 } Field_CropDrawCommand;
 
@@ -117,23 +117,25 @@ typedef struct
 typedef struct
 {
 	uint32_t writeIndex;
-	float spriteIndex;
+	int16_t spriteIndex;
 } Field_TileDrawCommand;
 
-float Field_ImageTable[] =
+int16_t Field_ImageTable[] =
 {
-	[FieldStage_Arable] = 3.0f,
-	[FieldStage_Fallow] = 4.0f,
-	[FieldStage_Planted] = 5.0f,
-	[FieldStage_Grown] = 6.0f
+	[FieldStage_Arable] = 3.0f / 11.0f * INT16_MAX,
+	[FieldStage_Fallow] = 4.0f / 11.0f * INT16_MAX,
+	[FieldStage_Planted] = 5.0f / 11.0f * INT16_MAX,
+	[FieldStage_Grown] = 6.0f / 11.0f * INT16_MAX
 };
 
 static uint32_t Field_TileDrawCommandCount = 0;
 static Field_TileDrawCommand* Field_TileDrawCommands = NULL;
 
-const uint32_t Field_Width = 1000;
-const uint32_t Field_Height = 1000;
+#define Field_Width 1000
+#define Field_Height 1000
 static Field_Tile* Field_Tiles = NULL;
+
+const int16_t Field_TileScale = (2.0f / Field_Width) * INT16_MAX;
 
 const float Crop_MinLifetime = 1.0f;
 const float Crop_MaxLifetime = 10.0f;
@@ -166,7 +168,7 @@ void field_tick(float delta)
 			Field_CropDrawCommands[Field_CropDrawCommandCount] = (Field_CropDrawCommand)
 				{
 					.writeIndex = i,
-					.spriteIndex = 7.0f + crop->cropType,
+					.spriteIndex = (7.0f + crop->cropType) / 11.0f * INT16_MAX,
 					.pos = crop->pos
 				};
 			Field_CropDrawCommandCount++;
@@ -219,6 +221,11 @@ typedef struct
 {
 	Vec2 pos;
 } AI_FarmerSearchStateGen;
+
+const int16_t AI_FarmerScale = 0.025f * INT16_MAX;
+const int16_t FarmerState_Search = 0;
+const int16_t FarmerState_Move = 1.0f / 11.0f * INT16_MAX;
+const int16_t FarmerState_Farm = 2.0f / 11.0f * INT16_MAX;
 
 const float AI_FarmerSpeed = 0.5f;
 const float AI_FarmerCropRadius = 0.005f;
@@ -355,7 +362,7 @@ void ai_tick(float delta)
 					Field_CropDrawCommands[Field_CropDrawCommandCount] = (Field_CropDrawCommand)
 						{
 							.writeIndex = Field_CropCount,
-							.spriteIndex = 7.0f + crop->cropType,
+							.spriteIndex = (7.0f + crop->cropType) / 11.0f * INT16_MAX,
 							.pos = crop->pos
 						};
 					Field_CropDrawCommandCount++;
@@ -385,10 +392,6 @@ void ai_tick(float delta)
 
 // Game
 
-const float FarmerState_Search = 0.0f;
-const float FarmerState_Move = 1.0f;
-const float FarmerState_Farm = 2.0f;
-
 void game_init(Game_InstanceBuffer* buffer)
 {
 	MIST_PROFILE_BEGIN("Game", "Game-Init");
@@ -409,12 +412,12 @@ void game_init(Game_InstanceBuffer* buffer)
 		for (uint32_t x = 0; x < Field_Width; ++x)
 		{
 			uint32_t writeLoc = y * Field_Width + x;
-			Field_Tiles[writeLoc].pos = (Vec2) { .x = (float)x / Field_Width, .y = (float)y / Field_Height };
-			Field_Tiles[writeLoc].pos = vec2_sub(vec2_mul(Field_Tiles[writeLoc].pos, 2.0f), (Vec2) { .x = 1.0f, .y = 1.0f });
+			Vec2 pos = (Vec2){ .x = (float)x / Field_Width, .y = (float)y / Field_Height };
+			Field_Tiles[writeLoc].pos = vec2_sub(vec2_mul(pos, 2.0f), (Vec2) { .x = 1.0f, .y = 1.0f });
 
-			buffer->spriteIndices[writeLoc] = Field_ImageTable[0];
-			buffer->scales[writeLoc] = 2.0f / Field_Width;
-			memcpy(&buffer->positions[writeLoc * 2], &Field_Tiles[writeLoc].pos, sizeof(float) * 2);
+			buffer->spriteIndicesAndScales[writeLoc * 2] = Field_ImageTable[0];
+			buffer->spriteIndicesAndScales[writeLoc * 2 + 1] = Field_TileScale;
+			memcpy(&buffer->positions[writeLoc * 2], &Field_Tiles[writeLoc].pos, sizeof(int16_t) * 2);
 		}
 	}
 
@@ -470,10 +473,14 @@ void game_kill(void)
 	AI_FarmersMoveHot = NULL;
 	free(AI_FarmersMoveCold);
 	AI_FarmersMoveCold = NULL;
+	free(AI_FarmersMoveGen);
+	AI_FarmersMoveGen = NULL;
 
 	free(AI_FarmersFarmHot);
 	AI_FarmersFarmHot = NULL;
 	free(AI_FarmersFarmCold);
+	AI_FarmersFarmCold = NULL;
+	free(AI_FarmersFarmGen);
 	AI_FarmersFarmCold = NULL;
 
 	free(AI_FarmersSearchHot);
@@ -491,15 +498,15 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 	for (uint32_t i = 0; i < Field_TileDrawCommandCount; ++i)
 	{
 		Field_TileDrawCommand* command = &Field_TileDrawCommands[i];
-		buffer->spriteIndices[command->writeIndex] = command->spriteIndex;
+		buffer->spriteIndicesAndScales[command->writeIndex * 2] = command->spriteIndex;
 	}
 	Field_TileDrawCommandCount = 0;
 
 	for (uint32_t i = 0; i < Field_CropDrawCommandCount; i++)
 	{
 		Field_CropDrawCommand* command = &Field_CropDrawCommands[i];
-		buffer->spriteIndices[command->writeIndex] = command->spriteIndex;
-		buffer->scales[command->writeIndex] = 2.0f / Field_Width;
+		buffer->spriteIndicesAndScales[command->writeIndex * 2] = command->spriteIndex;
+		buffer->spriteIndicesAndScales[command->writeIndex * 2 + 1] = Field_TileScale;
 		memcpy(&buffer->positions[command->writeIndex * 2], &command->pos, sizeof(float) * 2);
 	}
 	Field_CropDrawCommandCount = 0;
@@ -510,24 +517,24 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 	for (uint32_t i = 0; i < AI_FarmerSearchCount; ++i)
 	{
 		uint32_t writeLoc = writeIndex++;
-		buffer->spriteIndices[writeLoc] = FarmerState_Search;
-		buffer->scales[writeLoc] = 0.025f;
+		buffer->spriteIndicesAndScales[writeLoc * 2] = FarmerState_Search;
+		buffer->spriteIndicesAndScales[writeLoc * 2 + 1] = AI_FarmerScale;
 	}
 
 	memcpy(&buffer->positions[writeIndex * 2], AI_FarmersMoveGen, sizeof(float) * 2 * AI_FarmerMoveCount);
 	for (uint32_t i = 0; i < AI_FarmerMoveCount; ++i)
 	{
 		uint32_t writeLoc = writeIndex++;
-		buffer->spriteIndices[writeLoc] = FarmerState_Move;
-		buffer->scales[writeLoc] = 0.025f;
+		buffer->spriteIndicesAndScales[writeLoc * 2] = FarmerState_Move;
+		buffer->spriteIndicesAndScales[writeLoc * 2 + 1] = AI_FarmerScale;
 	}
 
 	memcpy(&buffer->positions[writeIndex * 2], AI_FarmersFarmGen, sizeof(float) * 2 * AI_FarmerFarmCount);
 	for (uint32_t i = 0; i < AI_FarmerFarmCount; ++i)
 	{
 		uint32_t writeLoc = writeIndex++;
-		buffer->spriteIndices[writeLoc] = FarmerState_Farm;
-		buffer->scales[writeLoc] = 0.025f;
+		buffer->spriteIndicesAndScales[writeLoc * 2] = FarmerState_Farm;
+		buffer->spriteIndicesAndScales[writeLoc * 2 + 1] = AI_FarmerScale;
 	}
 
 	MIST_PROFILE_END("Game", "Game-GenInstanceBuffer");

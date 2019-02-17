@@ -8,8 +8,7 @@
 
 typedef struct
 {
-	float spriteIndices[GAME_MAX_INSTANCE_COUNT];
-	float scales[GAME_MAX_INSTANCE_COUNT];
+	uint16_t spriteIndicesAndScales[GAME_MAX_INSTANCE_COUNT * 2];
 	float positions[GAME_MAX_INSTANCE_COUNT * 2];
 } Game_InstanceBuffer;
 

@@ -47,7 +47,7 @@ void core_init(void)
 
 	sg_buffer instanceBuffer = sg_make_buffer(&(sg_buffer_desc)
 	{
-		.size = sizeof(float) * GAME_MAX_INSTANCE_COUNT * 4,
+		.size = sizeof(float) * GAME_MAX_INSTANCE_COUNT * 2 + sizeof(int16_t) * GAME_MAX_INSTANCE_COUNT * 2,
 			.usage = SG_USAGE_STREAM
 	});
 
@@ -92,12 +92,11 @@ void core_init(void)
 	{
 		.layout =
 		{
-			.buffers[0] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE,.stride = sizeof(float) * 4 },
+			.buffers[0] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE,.stride = sizeof(float) * 2 + sizeof(int16_t) * 2 },
 			.attrs =
 				{
-					[0] = {.name = "sprite",.format = SG_VERTEXFORMAT_FLOAT, .offset = offsetof(Game_InstanceBuffer, spriteIndices) },
-					[1] = {.name = "scale",.format = SG_VERTEXFORMAT_FLOAT, .offset = offsetof(Game_InstanceBuffer, scales) },
-					[2] = {.name = "position",.format = SG_VERTEXFORMAT_FLOAT2, .offset = offsetof(Game_InstanceBuffer, positions) }
+					[0] = {.name = "spriteAndScale",.format = SG_VERTEXFORMAT_SHORT2N, .offset = offsetof(Game_InstanceBuffer, spriteIndicesAndScales) },
+					[1] = {.name = "position",.format = SG_VERTEXFORMAT_FLOAT2, .offset = offsetof(Game_InstanceBuffer, positions) }
 				}
 		},
 			.shader = shader,
@@ -257,16 +256,15 @@ sapp_desc sokol_main(int argc, char* argv[])
 const char* Render_VS =
 "#version 330\n"
 "uniform float aspect;\n"
-"in float sprite;\n"
-"in float scale;\n"
+"in vec2 spriteAndScale;\n"
 "in vec2 position;\n"
 "out vec2 uv;\n"
 "void main()\n"
 "{\n"
 "  const float kImageCount = 11.0;\n"
 "  vec2 vertexPos = vec2(gl_VertexID / 2, gl_VertexID & 1);\n"
-"  gl_Position = vec4((position + vertexPos * scale / vec2(aspect, 1.0)), 0.0, 1.0);\n"
-"  uv = vec2(vertexPos.x / kImageCount + sprite / kImageCount, 1.0 - vertexPos.y);\n"
+"  gl_Position = vec4((position + vertexPos * spriteAndScale.y / vec2(aspect, 1.0)), 0.0, 1.0);\n"
+"  uv = vec2(vertexPos.x / kImageCount + (spriteAndScale.x * 11.0) / kImageCount, 1.0 - vertexPos.y);\n"
 "}\n";
 
 const char* Render_FS =
