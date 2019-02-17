@@ -10,6 +10,9 @@
 #include <math.h>
 #include <time.h>
 
+#include <xmmintrin.h>
+#include <emmintrin.h>
+
 #define SWAP(type, a, b) do{ type t = b; b = a; a = t; }while(0);
 
 // Random
@@ -514,28 +517,28 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 	uint32_t writeIndex = Field_Width * Field_Height + Field_CropCount;
 
 	memcpy(&buffer->positions[writeIndex * 2], AI_FarmersSearchGen, sizeof(float) * 2 * AI_FarmerSearchCount);
-	for (uint32_t i = 0; i < AI_FarmerSearchCount; ++i)
+	__m128i searchAndScale = _mm_set_epi16(FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale);
+	for (uint32_t i = 0; i < AI_FarmerSearchCount; i+=4)
 	{
-		uint32_t writeLoc = writeIndex++;
-		buffer->spriteIndicesAndScales[writeLoc * 2] = FarmerState_Search;
-		buffer->spriteIndicesAndScales[writeLoc * 2 + 1] = AI_FarmerScale;
+		_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], searchAndScale);
 	}
+	writeIndex += AI_FarmerSearchCount;
 
 	memcpy(&buffer->positions[writeIndex * 2], AI_FarmersMoveGen, sizeof(float) * 2 * AI_FarmerMoveCount);
-	for (uint32_t i = 0; i < AI_FarmerMoveCount; ++i)
+	__m128i moveAndScale = _mm_set_epi16(FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale);
+	for (uint32_t i = 0; i < AI_FarmerMoveCount; i+=4)
 	{
-		uint32_t writeLoc = writeIndex++;
-		buffer->spriteIndicesAndScales[writeLoc * 2] = FarmerState_Move;
-		buffer->spriteIndicesAndScales[writeLoc * 2 + 1] = AI_FarmerScale;
+		_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], moveAndScale);
 	}
+	writeIndex += AI_FarmerMoveCount;
 
 	memcpy(&buffer->positions[writeIndex * 2], AI_FarmersFarmGen, sizeof(float) * 2 * AI_FarmerFarmCount);
-	for (uint32_t i = 0; i < AI_FarmerFarmCount; ++i)
+	__m128i farmAndScale = _mm_set_epi16(FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale);
+	for (uint32_t i = 0; i < AI_FarmerFarmCount; i+=4)
 	{
-		uint32_t writeLoc = writeIndex++;
-		buffer->spriteIndicesAndScales[writeLoc * 2] = FarmerState_Farm;
-		buffer->spriteIndicesAndScales[writeLoc * 2 + 1] = AI_FarmerScale;
+		_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], farmAndScale);
 	}
+	writeIndex += AI_FarmerFarmCount;
 
 	MIST_PROFILE_END("Game", "Game-GenInstanceBuffer");
 
