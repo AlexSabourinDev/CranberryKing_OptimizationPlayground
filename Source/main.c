@@ -18,6 +18,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include <immintrin.h>
+
 const uint16_t Window_Width = 1024;
 const uint16_t Window_Height = 720;
 const char* Window_Title = "Holy Cheese";
@@ -125,7 +127,7 @@ void core_init(void)
 			.fs_images[0] = image
 	};
 
-	Render_InstanceBuffer = malloc(sizeof(Game_InstanceBuffer));
+	Render_InstanceBuffer = _mm_malloc(sizeof(Game_InstanceBuffer), 64);
 	game_init(Render_InstanceBuffer);
 }
 
@@ -159,7 +161,7 @@ void core_frame(void)
 void core_cleanup(void)
 {
 	game_kill();
-	free(Render_InstanceBuffer);
+	_mm_free(Render_InstanceBuffer);
 
 	sg_shutdown();
 
@@ -172,7 +174,7 @@ void core_initProfile(void)
 	Mist_ProfileInit();
 
 	MIST_PROFILE_BEGIN("Core", "Init");
-	Render_InstanceBuffer = malloc(sizeof(Game_InstanceBuffer));
+	Render_InstanceBuffer = _mm_malloc(sizeof(Game_InstanceBuffer), 64);
 	game_init(Render_InstanceBuffer);
 	MIST_PROFILE_END("Core", "Init");
 }
@@ -202,7 +204,7 @@ void core_cleanupProfile(void)
 {
 	MIST_PROFILE_BEGIN("Core", "Cleanup");
 	game_kill();
-	free(Render_InstanceBuffer);
+	_mm_free(Render_InstanceBuffer);
 	MIST_PROFILE_END("Core", "Cleanup");
 
 	if (Mist_ProfileListSize() == 0)

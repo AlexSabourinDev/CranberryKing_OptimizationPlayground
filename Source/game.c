@@ -12,6 +12,7 @@
 
 #include <xmmintrin.h>
 #include <emmintrin.h>
+#include <smmintrin.h>
 
 #define SWAP(type, a, b) do{ type t = b; b = a; a = t; }while(0);
 
@@ -426,14 +427,14 @@ void game_init(Game_InstanceBuffer* buffer)
 
 	AI_FarmersMoveHot = (AI_FarmerMoveStateHot*)malloc(sizeof(AI_FarmerMoveStateHot) * AI_FarmerCount);
 	AI_FarmersMoveCold = (AI_FarmerMoveStateCold*)malloc(sizeof(AI_FarmerMoveStateCold) * AI_FarmerCount);
-	AI_FarmersMoveGen = (AI_FarmerMoveStateGen*)malloc(sizeof(AI_FarmerMoveStateGen) * AI_FarmerCount);
+	AI_FarmersMoveGen = (AI_FarmerMoveStateGen*)_mm_malloc(sizeof(AI_FarmerMoveStateGen) * AI_FarmerCount, 64);
 
 	AI_FarmersFarmHot = (AI_FarmerFarmStateHot*)malloc(sizeof(AI_FarmerFarmStateHot) * AI_FarmerCount);
 	AI_FarmersFarmCold = (AI_FarmerFarmStateCold*)malloc(sizeof(AI_FarmerFarmStateCold) * AI_FarmerCount);
-	AI_FarmersFarmGen = (AI_FarmerFarmStateGen*)malloc(sizeof(AI_FarmerFarmStateGen) * AI_FarmerCount);
+	AI_FarmersFarmGen = (AI_FarmerFarmStateGen*)_mm_malloc(sizeof(AI_FarmerFarmStateGen) * AI_FarmerCount, 64);
 
 	AI_FarmersSearchHot = (AI_FarmerSearchStateHot*)malloc(sizeof(AI_FarmerSearchStateHot) * AI_FarmerCount);
-	AI_FarmersSearchGen = (AI_FarmerSearchStateGen*)malloc(sizeof(AI_FarmerSearchStateGen) * AI_FarmerCount);
+	AI_FarmersSearchGen = (AI_FarmerSearchStateGen*)_mm_malloc(sizeof(AI_FarmerSearchStateGen) * AI_FarmerCount, 64);
 
 	AI_FarmerSearchCount = AI_FarmerCount;
 
@@ -476,19 +477,19 @@ void game_kill(void)
 	AI_FarmersMoveHot = NULL;
 	free(AI_FarmersMoveCold);
 	AI_FarmersMoveCold = NULL;
-	free(AI_FarmersMoveGen);
+	_mm_free(AI_FarmersMoveGen);
 	AI_FarmersMoveGen = NULL;
 
 	free(AI_FarmersFarmHot);
 	AI_FarmersFarmHot = NULL;
 	free(AI_FarmersFarmCold);
 	AI_FarmersFarmCold = NULL;
-	free(AI_FarmersFarmGen);
+	_mm_free(AI_FarmersFarmGen);
 	AI_FarmersFarmCold = NULL;
 
 	free(AI_FarmersSearchHot);
 	AI_FarmersSearchHot = NULL;
-	free(AI_FarmersSearchGen);
+	_mm_free(AI_FarmersSearchGen);
 	AI_FarmersSearchGen = NULL;
 
 	MIST_PROFILE_END("Game", "Game-Kill");
@@ -518,25 +519,28 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 
 	memcpy(&buffer->positions[writeIndex * 2], AI_FarmersSearchGen, sizeof(float) * 2 * AI_FarmerSearchCount);
 	__m128i searchAndScale = _mm_set_epi16(FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale);
-	for (uint32_t i = 0; i < AI_FarmerSearchCount; i+=4)
+	_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[writeIndex * 2], searchAndScale);
+	for (uint32_t i = (4 - writeIndex % 4); i < AI_FarmerSearchCount; i+=4)
 	{
-		_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], searchAndScale);
+		_mm_stream_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], searchAndScale);
 	}
 	writeIndex += AI_FarmerSearchCount;
 
 	memcpy(&buffer->positions[writeIndex * 2], AI_FarmersMoveGen, sizeof(float) * 2 * AI_FarmerMoveCount);
 	__m128i moveAndScale = _mm_set_epi16(FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale);
-	for (uint32_t i = 0; i < AI_FarmerMoveCount; i+=4)
+	_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[writeIndex * 2], moveAndScale);
+	for (uint32_t i = (4 - writeIndex % 4); i < AI_FarmerMoveCount; i+=4)
 	{
-		_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], moveAndScale);
+		_mm_stream_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], moveAndScale);
 	}
 	writeIndex += AI_FarmerMoveCount;
 
 	memcpy(&buffer->positions[writeIndex * 2], AI_FarmersFarmGen, sizeof(float) * 2 * AI_FarmerFarmCount);
 	__m128i farmAndScale = _mm_set_epi16(FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale);
-	for (uint32_t i = 0; i < AI_FarmerFarmCount; i+=4)
+	_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[writeIndex * 2], farmAndScale);
+	for (uint32_t i = (4 - writeIndex % 4); i < AI_FarmerFarmCount; i+=4)
 	{
-		_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], farmAndScale);
+		_mm_stream_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], farmAndScale);
 	}
 	writeIndex += AI_FarmerFarmCount;
 
