@@ -98,7 +98,8 @@ void core_init(void)
 			.attrs =
 				{
 					[0] = {.name = "spriteAndScale",.format = SG_VERTEXFORMAT_SHORT2N, .offset = offsetof(Game_InstanceBuffer, spriteIndicesAndScales) },
-					[1] = {.name = "position",.format = SG_VERTEXFORMAT_FLOAT2, .offset = offsetof(Game_InstanceBuffer, positions) }
+					[1] = {.name = "positionX",.format = SG_VERTEXFORMAT_FLOAT, .offset = offsetof(Game_InstanceBuffer, positionX) },
+					[2] = {.name = "positionY",.format = SG_VERTEXFORMAT_FLOAT, .offset = offsetof(Game_InstanceBuffer, positionY) }
 				}
 		},
 			.shader = shader,
@@ -259,10 +260,12 @@ const char* Render_VS =
 "#version 330\n"
 "uniform float aspect;\n"
 "in vec2 spriteAndScale;\n"
-"in vec2 position;\n"
+"in float positionX;\n"
+"in float positionY;\n"
 "out vec2 uv;\n"
 "void main()\n"
 "{\n"
+"  vec2 position = vec2(positionX, positionY);\n"
 "  const float kImageCount = 11.0;\n"
 "  vec2 vertexPos = vec2(gl_VertexID / 2, gl_VertexID & 1);\n"
 "  gl_Position = vec4((position + vertexPos * spriteAndScale.y / vec2(aspect, 1.0)), 0.0, 1.0);\n"
