@@ -536,7 +536,7 @@ void game_kill(void)
 	_mm_free(AI_FarmersMoveGenX);
 	_mm_free(AI_FarmersMoveGenY);
 
-	free(AI_FarmersFarmHot);
+	_mm_free(AI_FarmersFarmHot);
 	free(AI_FarmersFarmCold);
 	_mm_free(AI_FarmersFarmGenX);
 	_mm_free(AI_FarmersFarmGenY);
