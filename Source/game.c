@@ -1,6 +1,6 @@
 #include "game.h"
 
-#define MIST_PROFILE_ENABLED
+// #define MIST_PROFILE_ENABLED
 #include "3rd/Mist_Profiler.h"
 
 #include <stddef.h>
@@ -13,6 +13,7 @@
 #include <xmmintrin.h>
 #include <emmintrin.h>
 #include <smmintrin.h>
+#include <immintrin.h>
 
 #define SWAP(type, a, b) do{ type t = b; b = a; a = t; }while(0);
 
@@ -45,6 +46,30 @@ float math_minf(float l, float r)
 uint32_t math_max(uint32_t l, uint32_t r)
 {
 	return l > r ? l : r;
+}
+
+uint32_t math_min(uint32_t l, uint32_t r)
+{
+	return l < r ? l : r;
+}
+
+// SIMD
+
+// Thanks to https://stackoverflow.com/questions/36932240/avx2-what-is-the-most-efficient-way-to-pack-left-based-on-a-mask for this great algorithm
+// Uses 64bit pdep / pext to save a step in unpacking.
+__m256i simd_moveMaskToIndexMask(unsigned int mask /* from movmskps */)
+{
+	uint64_t expanded_mask = _pdep_u64(mask, 0x0101010101010101);  // unpack each bit to a byte
+	expanded_mask *= 0xFF;    // mask |= mask<<1 | mask<<2 | ... | mask<<7;
+	// ABC... -> AAAAAAAABBBBBBBBCCCCCCCC...: replicate each bit to fill its byte
+
+	const uint64_t identity_indices = 0x0706050403020100;    // the identity shuffle for vpermps, packed to one index per byte
+	uint64_t wanted_indices = _pext_u64(identity_indices, expanded_mask);
+
+	__m128i bytevec = _mm_cvtsi64_si128(wanted_indices);
+	__m256i shufmask = _mm256_cvtepu8_epi32(bytevec);
+
+	return shufmask;
 }
 
 // Crops
@@ -187,7 +212,7 @@ const float AI_FarmerSearchSpeedMin = 0.0f;
 const float AI_FarmerSearchSpeedMax = 1.0f;
 const float AI_FarmerFarmSpeedMin = 3.0f;
 const float AI_FarmerFarmSpeedMax = 5.0f;
-const uint32_t AI_FarmerCount = 1000000;
+#define AI_FarmerCount 1000000
 
 static uint32_t AI_FarmerMoveCount = 0;
 static float* AI_FarmersMoveHotX = NULL;
@@ -204,6 +229,8 @@ static uint32_t AI_FarmerSearchCount = 0;
 static AI_FarmerSearchStateHot* AI_FarmersSearchHot = NULL;
 static float* AI_FarmersSearchGenX = NULL;
 static float* AI_FarmersSearchGenY = NULL;
+
+static int* AI_FarmerRemovalIndices = NULL;
 
 void ai_tick(float delta)
 {
@@ -256,44 +283,68 @@ void ai_tick(float delta)
 
 	uint32_t previousFarmerFarmCount = AI_FarmerFarmCount;
 	{
-		float velMag = AI_FarmerSpeed * delta;
+		float v = AI_FarmerSpeed * delta;
+		float rv = 1.0f / v;
+		__m256 velMag = _mm256_set_ps(v, v, v, v, v, v, v, v);
+		__m256 rvelMag = _mm256_set_ps(rv, rv, rv, rv, rv, rv, rv, rv);
+
+		uint32_t removedFarmerCount = 0;
 
 		// We only do the farmers that were already in the move array before this tick
-		for (uint32_t i = 0; i < previousFarmerMoveCount; i++)
+		for (uint32_t i = 0; i < previousFarmerMoveCount; i+=8)
 		{
-			float farmerX = AI_FarmersMoveHotX[i];
-			float farmerY = AI_FarmersMoveHotY[i];
-			float genFarmerX = AI_FarmersMoveGenX[i];
-			float genFarmerY = AI_FarmersMoveGenY[i];
+			__m256 farmerX = _mm256_load_ps(AI_FarmersMoveHotX + i);
+			__m256 farmerY = _mm256_load_ps(AI_FarmersMoveHotY + i);
+			__m256 genFarmerX = _mm256_load_ps(AI_FarmersMoveGenX + i);
+			__m256 genFarmerY = _mm256_load_ps(AI_FarmersMoveGenY + i);
 
-			float dirVecX = farmerX - genFarmerX;
-			float dirVecY = farmerY - genFarmerY;
-			float mag = sqrtf(dirVecX * dirVecX + dirVecY * dirVecY);
+			__m256 dirVecX = _mm256_sub_ps(farmerX, genFarmerX);
+			__m256 dirVecY = _mm256_sub_ps(farmerY, genFarmerY);
+			__m256 rmag = _mm256_rsqrt_ps(_mm256_add_ps(_mm256_mul_ps(dirVecX, dirVecX), _mm256_mul_ps(dirVecY, dirVecY)));
 
-			float velX = dirVecX * velMag / mag;
-			float velY = dirVecY * velMag / mag;
-			AI_FarmersMoveGenX[i] = genFarmerX + velX;
-			AI_FarmersMoveGenY[i] = genFarmerY + velY;
+			__m256 velX = _mm256_mul_ps(dirVecX, _mm256_mul_ps(velMag, rmag));
+			__m256 velY = _mm256_mul_ps(dirVecY, _mm256_mul_ps(velMag, rmag));
+			_mm256_store_ps(AI_FarmersMoveGenX + i, _mm256_add_ps(genFarmerX, velX));
+			_mm256_store_ps(AI_FarmersMoveGenY + i, _mm256_add_ps(genFarmerY, velY));
 
-			if (velMag > mag)
-			{
-				AI_FarmerMoveStateCold* coldFarmer = &AI_FarmersMoveCold[i];
+			int bitMask = (1 << math_min(previousFarmerMoveCount - i, 8)) - 1;
 
-				AI_FarmersFarmHot[AI_FarmerFarmCount].farmTimer = rand_rangef(AI_FarmerFarmSpeedMin, AI_FarmerFarmSpeedMax);
-				AI_FarmersFarmCold[AI_FarmerFarmCount].tileIndex = coldFarmer->tileIndex;
-				AI_FarmersFarmGenX[AI_FarmerFarmCount] = farmerX;
-				AI_FarmersFarmGenY[AI_FarmerFarmCount] = farmerY;
-				AI_FarmerFarmCount++;
+			// Since we're calculating reciprocals, the larger number is smaller
+			// So instead of whether our velocity is larger than our distance,
+			// we check to see if our r velocity is smaller than our r distance
+			// vel = 1, dist = 0.5 vel > dist ? we passed it!
+			// rvel = 1/1, dist = 1/0.5 rvel < rdist ? we passed it!
+			__m256 cmpRes = _mm256_cmp_ps(rvelMag, rmag, _CMP_LT_OQ);
+			int indexMask = _mm256_movemask_ps(cmpRes) & bitMask;
 
-				SWAP(float, AI_FarmersMoveHotX[i], AI_FarmersMoveHotX[AI_FarmerMoveCount - 1]);
-				SWAP(float, AI_FarmersMoveHotY[i], AI_FarmersMoveHotY[AI_FarmerMoveCount - 1]);
-				SWAP(AI_FarmerMoveStateCold, *coldFarmer, AI_FarmersMoveCold[AI_FarmerMoveCount - 1]);
-				SWAP(float, AI_FarmersMoveGenX[i], AI_FarmersMoveGenX[AI_FarmerMoveCount - 1]);
-				SWAP(float, AI_FarmersMoveGenY[i], AI_FarmersMoveGenY[AI_FarmerMoveCount - 1]);
-				AI_FarmerMoveCount--;
-				i--;
-			}
+			__m256i indices = _mm256_set_epi32(i, i, i, i, i, i, i, i);
+			__m256i indexAdd = simd_moveMaskToIndexMask(indexMask);
+			indices = _mm256_add_epi32(indices, indexAdd);
+
+			_mm256_storeu_si256((__m256i*)(AI_FarmerRemovalIndices + removedFarmerCount), indices);
+			removedFarmerCount += _mm_popcnt_u32(indexMask);
 		}
+
+
+		for(uint32_t i = 0; i < removedFarmerCount; i++)
+		{
+			int r = AI_FarmerRemovalIndices[i];
+			AI_FarmerMoveStateCold* coldFarmer = &AI_FarmersMoveCold[r];
+
+			AI_FarmersFarmHot[AI_FarmerFarmCount + i].farmTimer = rand_rangef(AI_FarmerFarmSpeedMin, AI_FarmerFarmSpeedMax);
+			AI_FarmersFarmCold[AI_FarmerFarmCount + i].tileIndex = coldFarmer->tileIndex;
+			AI_FarmersFarmGenX[AI_FarmerFarmCount + i] = AI_FarmersMoveGenX[r];
+			AI_FarmersFarmGenY[AI_FarmerFarmCount + i] = AI_FarmersMoveGenY[r];
+
+			SWAP(float, AI_FarmersMoveHotX[r], AI_FarmersMoveHotX[AI_FarmerMoveCount - 1 - i]);
+			SWAP(float, AI_FarmersMoveHotY[r], AI_FarmersMoveHotY[AI_FarmerMoveCount - 1 - i]);
+			SWAP(AI_FarmerMoveStateCold, *coldFarmer, AI_FarmersMoveCold[AI_FarmerMoveCount - 1 - i]);
+			SWAP(float, AI_FarmersMoveGenX[r], AI_FarmersMoveGenX[AI_FarmerMoveCount - 1 - i]);
+			SWAP(float, AI_FarmersMoveGenY[r], AI_FarmersMoveGenY[AI_FarmerMoveCount - 1 - i]);
+		}
+
+		AI_FarmerMoveCount -= removedFarmerCount;
+		AI_FarmerFarmCount += removedFarmerCount;
 	}
 
 	{
@@ -400,6 +451,8 @@ void game_init(Game_InstanceBuffer* buffer)
 	AI_FarmersSearchGenX = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
 	AI_FarmersSearchGenY = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
 
+	AI_FarmerRemovalIndices = (int*)_mm_malloc(sizeof(int) * AI_FarmerCount, 64);
+
 	AI_FarmerSearchCount = AI_FarmerCount;
 
 	memset(AI_FarmersSearchGenX, 0, sizeof(float) * AI_FarmerCount);
@@ -446,6 +499,8 @@ void game_kill(void)
 	free(AI_FarmersSearchHot);
 	_mm_free(AI_FarmersSearchGenX);
 	_mm_free(AI_FarmersSearchGenY);
+
+	_mm_free(AI_FarmerRemovalIndices);
 
 	MIST_PROFILE_END("Game", "Game-Kill");
 }
