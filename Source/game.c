@@ -1,6 +1,6 @@
 #include "game.h"
 
-// #define MIST_PROFILE_ENABLED
+#define MIST_PROFILE_ENABLED
 #include "3rd/Mist_Profiler.h"
 
 #include <stddef.h>
@@ -84,8 +84,6 @@ typedef enum
 
 typedef struct
 {
-	float grown;
-	float lifetime;
 	uint32_t cropType;
 	uint32_t tileIndex;
 } Field_Crop;
@@ -103,6 +101,7 @@ static Field_CropDrawCommand* Field_CropDrawCommands = NULL;
 
 static uint32_t Field_CropCount = 0;
 static Field_Crop* Field_Crops = NULL;
+static float* Field_CropLifetimes = NULL;
 
 typedef struct
 {
@@ -142,11 +141,13 @@ void field_tick(float delta)
 
 	for (uint32_t i = 0; i < Field_CropCount; ++i)
 	{
-		Field_Crop* crop = &Field_Crops[i];
-		crop->lifetime += delta;
+		float* lifetime = &Field_CropLifetimes[i];
+		*lifetime -= delta;
 
-		if (crop->lifetime >= crop->grown)
+		if (*lifetime <= 0.0f)
 		{
+			Field_Crop* crop = &Field_Crops[i];
+
 			Field_Tile* tile = &Field_Tiles[crop->tileIndex];
 			tile->stage = FieldStage_Grown;
 
@@ -370,8 +371,7 @@ void ai_tick(float delta)
 				if (tile->stage == FieldStage_Planted)
 				{
 					Field_Crop* crop = &Field_Crops[Field_CropCount];
-					crop->grown = rand_rangef(Crop_MinLifetime, Crop_MaxLifetime);
-					crop->lifetime = 0.0f;
+					Field_CropLifetimes[Field_CropCount] = rand_rangef(Crop_MinLifetime, Crop_MaxLifetime);
 					crop->cropType = rand_range(0, Crop_MaxCropType);
 					crop->tileIndex = coldFarmer->tileIndex;
 
@@ -422,6 +422,7 @@ void game_init(Game_InstanceBuffer* buffer)
 	Field_TileDrawCommands = (Field_TileDrawCommand*)malloc(sizeof(Field_TileDrawCommand) * Field_Width * Field_Height);
 
 	Field_Crops = (Field_Crop*)malloc(sizeof(Field_Crop) * Field_Width * Field_Height);
+	Field_CropLifetimes = (float*)_mm_malloc(sizeof(float) * Field_Width * Field_Height, 64);
 	Field_CropDrawCommands = (Field_CropDrawCommand*)malloc(sizeof(Field_CropDrawCommand) * Field_Width * Field_Height);
 
 	for (uint32_t y = 0; y < Field_Height; ++y)
@@ -480,6 +481,7 @@ void game_kill(void)
 	MIST_PROFILE_BEGIN("Game", "Game-Kill");
 
 	free(Field_Crops);
+	_mm_free(Field_CropLifetimes);
 	free(Field_CropDrawCommands);
 
 	free(Field_Tiles);

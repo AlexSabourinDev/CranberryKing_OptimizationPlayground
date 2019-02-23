@@ -12,7 +12,7 @@
 #include "3rd/stb_image.h"
 
 #define MIST_PROFILE_IMPLEMENTATION
-// #define MIST_PROFILE_ENABLED
+#define MIST_PROFILE_ENABLED
 #include "3rd/Mist_Profiler.h"
 
 #include <stdint.h>
