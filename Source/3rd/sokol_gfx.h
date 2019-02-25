@@ -713,6 +713,7 @@ typedef enum sg_wrap {
 */
 typedef enum sg_vertex_format {
     SG_VERTEXFORMAT_INVALID,
+	SG_VERTEXFORMAT_HALF,
     SG_VERTEXFORMAT_FLOAT,
     SG_VERTEXFORMAT_FLOAT2,
     SG_VERTEXFORMAT_FLOAT3,
@@ -1711,6 +1712,7 @@ enum {
 /* return byte size of a vertex format */
 _SOKOL_PRIVATE int _sg_vertexformat_bytesize(sg_vertex_format fmt) {
     switch (fmt) {
+        case SG_VERTEXFORMAT_HALF:      return 2;
         case SG_VERTEXFORMAT_FLOAT:     return 4;
         case SG_VERTEXFORMAT_FLOAT2:    return 8;
         case SG_VERTEXFORMAT_FLOAT3:    return 12;
@@ -2043,6 +2045,7 @@ _SOKOL_PRIVATE GLenum _sg_gl_shader_stage(sg_shader_stage stage) {
 
 _SOKOL_PRIVATE GLint _sg_gl_vertexformat_size(sg_vertex_format fmt) {
     switch (fmt) {
+        case SG_VERTEXFORMAT_HALF:    return 1;
         case SG_VERTEXFORMAT_FLOAT:     return 1;
         case SG_VERTEXFORMAT_FLOAT2:    return 2;
         case SG_VERTEXFORMAT_FLOAT3:    return 3;
@@ -2062,6 +2065,8 @@ _SOKOL_PRIVATE GLint _sg_gl_vertexformat_size(sg_vertex_format fmt) {
 
 _SOKOL_PRIVATE GLenum _sg_gl_vertexformat_type(sg_vertex_format fmt) {
     switch (fmt) {
+        case SG_VERTEXFORMAT_HALF:
+            return GL_HALF_FLOAT;
         case SG_VERTEXFORMAT_FLOAT:
         case SG_VERTEXFORMAT_FLOAT2:
         case SG_VERTEXFORMAT_FLOAT3:

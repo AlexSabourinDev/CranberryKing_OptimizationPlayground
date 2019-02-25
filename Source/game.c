@@ -55,6 +55,9 @@ uint32_t math_min(uint32_t l, uint32_t r)
 
 // SIMD
 
+#define SIMD_FLOAT_TO_HALF(f) _mm_extract_epi16(_mm_cvtps_ph(_mm_set_ss(f), _MM_FROUND_NO_EXC), 0)
+#define SIMD_LOAD_PH_TO_PS(a) _mm256_cvtph_ps(_mm_load_si128((__m128i*)(a)))
+
 // Thanks to https://stackoverflow.com/questions/36932240/avx2-what-is-the-most-efficient-way-to-pack-left-based-on-a-mask for this great algorithm
 // Uses 64bit pdep / pext to save a step in unpacking.
 __m256i simd_moveMaskToIndexMask(unsigned int mask /* from movmskps */)
@@ -94,8 +97,8 @@ typedef struct
 {
 	uint32_t writeIndex;
 	int16_t spriteIndex;
-	float posX;
-	float posY;
+	uint16_t posX;
+	uint16_t posY;
 } Field_CropDrawCommand;
 
 static uint32_t Field_CropDrawCommandCount = 0;
@@ -103,7 +106,7 @@ static Field_CropDrawCommand* Field_CropDrawCommands = NULL;
 
 static uint32_t Field_CropCount = 0;
 static Field_Crop* Field_Crops = NULL;
-static float* Field_CropLifetimes = NULL;
+static uint16_t* Field_CropLifetimes = NULL;
 
 typedef struct
 {
@@ -147,9 +150,9 @@ void field_tick(float delta)
 	uint32_t grownCropCount = 0;
 	for (uint32_t i = 0; i < Field_CropCount; i+=8)
 	{
-		__m256 lifetime = _mm256_load_ps(Field_CropLifetimes + i);
+		__m256 lifetime = SIMD_LOAD_PH_TO_PS(Field_CropLifetimes + i);
 		lifetime = _mm256_sub_ps(lifetime, delta256);
-		_mm256_store_ps(Field_CropLifetimes + i, lifetime);
+		_mm_store_si128((__m128i*)(Field_CropLifetimes + i), _mm256_cvtps_ph(lifetime, _MM_FROUND_NO_EXC));
 
 		int bitMask = (1 << math_min(Field_CropCount - i, 8)) - 1;
 
@@ -186,8 +189,8 @@ void field_tick(float delta)
 		{
 			.writeIndex = r,
 			.spriteIndex = (7.0f + crop->cropType) / 11.0f * INT16_MAX,
-			.posX = (div - f) * 2.0f - 1.0f,
-			.posY = f / Field_Height * 2.0f - 1.0f
+			.posX = SIMD_FLOAT_TO_HALF((div - f) * 2.0f - 1.0f),
+			.posY = SIMD_FLOAT_TO_HALF(f / Field_Height * 2.0f - 1.0f)
 		};
 	}
 	Field_TileDrawCommandCount += grownCropCount;
@@ -203,11 +206,13 @@ void field_tick(float delta)
 typedef struct
 {
 	uint32_t tileIndex;
+	Field_Stage stage;
 } AI_FarmerMoveStateCold;
 
 typedef struct
 {
 	uint32_t tileIndex;
+	Field_Stage stage;
 } AI_FarmerFarmStateCold;
 
 const int16_t AI_FarmerScale = 0.025f * INT16_MAX;
@@ -224,20 +229,20 @@ const float AI_FarmerFarmSpeedMax = 5.0f;
 #define AI_FarmerCount 1000000
 
 static uint32_t AI_FarmerMoveCount = 0;
-static float* AI_FarmersMoveHotX = NULL;
-static float* AI_FarmersMoveHotY = NULL;
+static uint16_t* AI_FarmersMoveHotX = NULL;
+static uint16_t* AI_FarmersMoveHotY = NULL;
 static AI_FarmerMoveStateCold* AI_FarmersMoveCold = NULL;
-static float* AI_FarmersMoveGenX = NULL;
-static float* AI_FarmersMoveGenY = NULL;
+static uint16_t* AI_FarmersMoveGenX = NULL;
+static uint16_t* AI_FarmersMoveGenY = NULL;
 static uint32_t AI_FarmerFarmCount = 0;
-static float* AI_FarmersFarmHot = NULL;
+static uint16_t* AI_FarmersFarmHot = NULL;
 static AI_FarmerFarmStateCold* AI_FarmersFarmCold = NULL;
-static float* AI_FarmersFarmGenX = NULL;
-static float* AI_FarmersFarmGenY = NULL;
+static uint16_t* AI_FarmersFarmGenX = NULL;
+static uint16_t* AI_FarmersFarmGenY = NULL;
 static uint32_t AI_FarmerSearchCount = 0;
-static float* AI_FarmersSearchHot = NULL;
-static float* AI_FarmersSearchGenX = NULL;
-static float* AI_FarmersSearchGenY = NULL;
+static uint16_t* AI_FarmersSearchHot = NULL;
+static uint16_t* AI_FarmersSearchGenX = NULL;
+static uint16_t* AI_FarmersSearchGenY = NULL;
 
 void ai_tick(float delta)
 {
@@ -251,10 +256,9 @@ void ai_tick(float delta)
 		uint32_t removedFarmerCount = 0;
 		for (uint32_t i = 0; i < AI_FarmerSearchCount; i+=8)
 		{
-			__m256 farmerSearchTimer = _mm256_load_ps(AI_FarmersSearchHot + i);
-
+			__m256 farmerSearchTimer = SIMD_LOAD_PH_TO_PS(AI_FarmersSearchHot + i);
 			farmerSearchTimer = _mm256_sub_ps(farmerSearchTimer, delta256);
-			_mm256_store_ps(AI_FarmersSearchHot + i, farmerSearchTimer);
+			_mm_store_si128((__m128i*)(AI_FarmersSearchHot + i), _mm256_cvtps_ph(farmerSearchTimer, _MM_FROUND_NO_EXC));
 
 			int bitMask = (1 << math_min(AI_FarmerSearchCount - i, 8)) - 1;
 
@@ -278,29 +282,30 @@ void ai_tick(float delta)
 
 			if (tile->stage != FieldStage_Planted)
 			{
-				float* genFarmerX = &AI_FarmersSearchGenX[r];
-				float* genFarmerY = &AI_FarmersSearchGenY[r];
+				uint16_t* genFarmerX = &AI_FarmersSearchGenX[r];
+				uint16_t* genFarmerY = &AI_FarmersSearchGenY[r];
 
 				float div = (float)tileIndex / Field_Width;
 				float f = floorf(div);
-				AI_FarmersMoveHotX[AI_FarmerMoveCount] = (div - f) * 2.0f - 1.0f;
-				AI_FarmersMoveHotY[AI_FarmerMoveCount] = f / Field_Height * 2.0f - 1.0f;
+				AI_FarmersMoveHotX[AI_FarmerMoveCount] = SIMD_FLOAT_TO_HALF((div - f) * 2.0f - 1.0f);
+				AI_FarmersMoveHotY[AI_FarmerMoveCount] = SIMD_FLOAT_TO_HALF(f / Field_Height * 2.0f - 1.0f);
 
 				AI_FarmersMoveCold[AI_FarmerMoveCount].tileIndex = tileIndex;
+				AI_FarmersMoveCold[AI_FarmerMoveCount].stage = tile->stage;
 
 				AI_FarmersMoveGenX[AI_FarmerMoveCount] = *genFarmerX;
 				AI_FarmersMoveGenY[AI_FarmerMoveCount] = *genFarmerY;
 				AI_FarmerMoveCount++;
 
-				SWAP(float, AI_FarmersSearchHot[r], AI_FarmersSearchHot[AI_FarmerSearchCount - 1]);
-				SWAP(float, *genFarmerX, AI_FarmersSearchGenX[AI_FarmerSearchCount - 1]);
-				SWAP(float, *genFarmerY, AI_FarmersSearchGenY[AI_FarmerSearchCount - 1]);
+				SWAP(uint16_t, AI_FarmersSearchHot[r], AI_FarmersSearchHot[AI_FarmerSearchCount - 1]);
+				SWAP(uint16_t, *genFarmerX, AI_FarmersSearchGenX[AI_FarmerSearchCount - 1]);
+				SWAP(uint16_t, *genFarmerY, AI_FarmersSearchGenY[AI_FarmerSearchCount - 1]);
 
 				AI_FarmerSearchCount--;
 			}
 			else
 			{
-				AI_FarmersSearchHot[r] = rand_rangef(AI_FarmerSearchSpeedMin, AI_FarmerSearchSpeedMax);
+				AI_FarmersSearchHot[r] = SIMD_FLOAT_TO_HALF(rand_rangef(AI_FarmerSearchSpeedMin, AI_FarmerSearchSpeedMax));
 			}
 		}
 	}
@@ -317,10 +322,10 @@ void ai_tick(float delta)
 		// We only do the farmers that were already in the move array before this tick
 		for (uint32_t i = 0; i < previousFarmerMoveCount; i+=8)
 		{
-			__m256 farmerX = _mm256_load_ps(AI_FarmersMoveHotX + i);
-			__m256 farmerY = _mm256_load_ps(AI_FarmersMoveHotY + i);
-			__m256 genFarmerX = _mm256_load_ps(AI_FarmersMoveGenX + i);
-			__m256 genFarmerY = _mm256_load_ps(AI_FarmersMoveGenY + i);
+			__m256 farmerX = SIMD_LOAD_PH_TO_PS(AI_FarmersMoveHotX + i);
+			__m256 farmerY = SIMD_LOAD_PH_TO_PS(AI_FarmersMoveHotY + i);
+			__m256 genFarmerX = SIMD_LOAD_PH_TO_PS(AI_FarmersMoveGenX + i);
+			__m256 genFarmerY = SIMD_LOAD_PH_TO_PS(AI_FarmersMoveGenY + i);
 
 			__m256 dirVecX = _mm256_sub_ps(farmerX, genFarmerX);
 			__m256 dirVecY = _mm256_sub_ps(farmerY, genFarmerY);
@@ -328,8 +333,8 @@ void ai_tick(float delta)
 
 			__m256 velX = _mm256_mul_ps(dirVecX, _mm256_mul_ps(velMag, rmag));
 			__m256 velY = _mm256_mul_ps(dirVecY, _mm256_mul_ps(velMag, rmag));
-			_mm256_store_ps(AI_FarmersMoveGenX + i, _mm256_add_ps(genFarmerX, velX));
-			_mm256_store_ps(AI_FarmersMoveGenY + i, _mm256_add_ps(genFarmerY, velY));
+			_mm_store_si128((__m128i*)(AI_FarmersMoveGenX + i), _mm256_cvtps_ph(_mm256_add_ps(genFarmerX, velX), _MM_FROUND_NO_EXC));
+			_mm_store_si128((__m128i*)(AI_FarmersMoveGenY + i), _mm256_cvtps_ph(_mm256_add_ps(genFarmerY, velY), _MM_FROUND_NO_EXC));
 
 			int bitMask = (1 << math_min(previousFarmerMoveCount - i, 8)) - 1;
 
@@ -353,18 +358,20 @@ void ai_tick(float delta)
 		for(uint32_t i = 0; i < removedFarmerCount; i++)
 		{
 			int r = SIMD_FarmerRemovalIndices[i];
+
 			AI_FarmerMoveStateCold* coldFarmer = &AI_FarmersMoveCold[r];
 
-			AI_FarmersFarmHot[AI_FarmerFarmCount + i] = rand_rangef(AI_FarmerFarmSpeedMin, AI_FarmerFarmSpeedMax);
+			AI_FarmersFarmHot[AI_FarmerFarmCount + i] = SIMD_FLOAT_TO_HALF(rand_rangef(AI_FarmerFarmSpeedMin, AI_FarmerFarmSpeedMax));
 			AI_FarmersFarmCold[AI_FarmerFarmCount + i].tileIndex = coldFarmer->tileIndex;
+			AI_FarmersFarmCold[AI_FarmerFarmCount + i].stage = coldFarmer->stage;
 			AI_FarmersFarmGenX[AI_FarmerFarmCount + i] = AI_FarmersMoveGenX[r];
 			AI_FarmersFarmGenY[AI_FarmerFarmCount + i] = AI_FarmersMoveGenY[r];
 
-			SWAP(float, AI_FarmersMoveHotX[r], AI_FarmersMoveHotX[AI_FarmerMoveCount - 1 - i]);
-			SWAP(float, AI_FarmersMoveHotY[r], AI_FarmersMoveHotY[AI_FarmerMoveCount - 1 - i]);
+			SWAP(uint16_t, AI_FarmersMoveHotX[r], AI_FarmersMoveHotX[AI_FarmerMoveCount - 1 - i]);
+			SWAP(uint16_t, AI_FarmersMoveHotY[r], AI_FarmersMoveHotY[AI_FarmerMoveCount - 1 - i]);
 			SWAP(AI_FarmerMoveStateCold, *coldFarmer, AI_FarmersMoveCold[AI_FarmerMoveCount - 1 - i]);
-			SWAP(float, AI_FarmersMoveGenX[r], AI_FarmersMoveGenX[AI_FarmerMoveCount - 1 - i]);
-			SWAP(float, AI_FarmersMoveGenY[r], AI_FarmersMoveGenY[AI_FarmerMoveCount - 1 - i]);
+			SWAP(uint16_t, AI_FarmersMoveGenX[r], AI_FarmersMoveGenX[AI_FarmerMoveCount - 1 - i]);
+			SWAP(uint16_t, AI_FarmersMoveGenY[r], AI_FarmersMoveGenY[AI_FarmerMoveCount - 1 - i]);
 		}
 
 		AI_FarmerMoveCount -= removedFarmerCount;
@@ -380,9 +387,9 @@ void ai_tick(float delta)
 		// We only do the farmers that were already in the farm array before this tick
 		for (uint32_t i = 0; i < previousFarmerFarmCount; i+=8)
 		{
-			__m256 farmerFarmTimer = _mm256_load_ps(AI_FarmersFarmHot + i);
+			__m256 farmerFarmTimer = SIMD_LOAD_PH_TO_PS(AI_FarmersFarmHot + i);
 			farmerFarmTimer = _mm256_sub_ps(farmerFarmTimer, delta256);
-			_mm256_store_ps(AI_FarmersFarmHot + i, farmerFarmTimer);
+			_mm_store_si128((__m128i*)(AI_FarmersFarmHot + i), _mm256_cvtps_ph(farmerFarmTimer, _MM_FROUND_NO_EXC));
 
 			int bitMask = (1 << math_min(previousFarmerFarmCount - i, 8)) - 1;
 
@@ -402,16 +409,19 @@ void ai_tick(float delta)
 			int r = SIMD_FarmerRemovalIndices[i];
 
 			AI_FarmerFarmStateCold* coldFarmer = &AI_FarmersFarmCold[r];
+
+			uint32_t newStage = math_max((coldFarmer->stage + 1) % FieldState_Max, FieldStage_Fallow);
+
 			Field_Tile* tile = &Field_Tiles[coldFarmer->tileIndex];
-			tile->stage = math_max((tile->stage + 1) % FieldState_Max, FieldStage_Fallow);
+			tile->stage = newStage;
 
 			Field_TileDrawCommands[Field_TileDrawCommandCount + i] = (Field_TileDrawCommand)
 				{
 					.writeIndex = coldFarmer->tileIndex,
-					.spriteIndex = Field_ImageTable[tile->stage]
+					.spriteIndex = Field_ImageTable[newStage]
 				};
 
-			if (tile->stage == FieldStage_Planted)
+			if (newStage == FieldStage_Planted)
 			{
 				Field_Crop* crop = &Field_Crops[Field_CropCount];
 				Field_CropLifetimes[Field_CropCount] = rand_rangef(Crop_MinLifetime, Crop_MaxLifetime);
@@ -424,22 +434,22 @@ void ai_tick(float delta)
 					{
 						.writeIndex = Field_CropCount,
 						.spriteIndex = (7.0f + crop->cropType) / 11.0f * INT16_MAX,
-						.posX = (div - f) * 2.0f - 1.0f,
-						.posY = f / Field_Height * 2.0f - 1.0f
+						.posX = SIMD_FLOAT_TO_HALF((div - f) * 2.0f - 1.0f),
+						.posY = SIMD_FLOAT_TO_HALF(f / Field_Height * 2.0f - 1.0f)
 					};
 				Field_CropDrawCommandCount++;
 
 				Field_CropCount++;
 			}
 
-			AI_FarmersSearchHot[AI_FarmerSearchCount + i] = rand_rangef(AI_FarmerSearchSpeedMin, AI_FarmerSearchSpeedMax);
+			AI_FarmersSearchHot[AI_FarmerSearchCount + i] = SIMD_FLOAT_TO_HALF(rand_rangef(AI_FarmerSearchSpeedMin, AI_FarmerSearchSpeedMax));
 			AI_FarmersSearchGenX[AI_FarmerSearchCount + i] = AI_FarmersFarmGenX[r];
 			AI_FarmersSearchGenY[AI_FarmerSearchCount + i] = AI_FarmersFarmGenY[r];
 
-			SWAP(float, AI_FarmersFarmHot[r], AI_FarmersFarmHot[AI_FarmerFarmCount - 1 - i]);
+			SWAP(uint16_t, AI_FarmersFarmHot[r], AI_FarmersFarmHot[AI_FarmerFarmCount - 1 - i]);
 			SWAP(AI_FarmerFarmStateCold, AI_FarmersFarmCold[r], AI_FarmersFarmCold[AI_FarmerFarmCount - 1 - i]);
-			SWAP(float, AI_FarmersFarmGenX[r], AI_FarmersFarmGenX[AI_FarmerFarmCount - 1 - i]);
-			SWAP(float, AI_FarmersFarmGenY[r], AI_FarmersFarmGenY[AI_FarmerFarmCount - 1 - i]);
+			SWAP(uint16_t, AI_FarmersFarmGenX[r], AI_FarmersFarmGenX[AI_FarmerFarmCount - 1 - i]);
+			SWAP(uint16_t, AI_FarmersFarmGenY[r], AI_FarmersFarmGenY[AI_FarmerFarmCount - 1 - i]);
 		}
 
 		AI_FarmerSearchCount += removedFarmerCount;
@@ -465,7 +475,7 @@ void game_init(Game_InstanceBuffer* buffer)
 	Field_TileDrawCommands = (Field_TileDrawCommand*)malloc(sizeof(Field_TileDrawCommand) * Field_Width * Field_Height);
 
 	Field_Crops = (Field_Crop*)malloc(sizeof(Field_Crop) * Field_Width * Field_Height);
-	Field_CropLifetimes = (float*)_mm_malloc(sizeof(float) * Field_Width * Field_Height, 64);
+	Field_CropLifetimes = (uint16_t*)_mm_malloc(sizeof(uint16_t) * Field_Width * Field_Height, 64);
 	Field_CropDrawCommands = (Field_CropDrawCommand*)malloc(sizeof(Field_CropDrawCommand) * Field_Width * Field_Height);
 
 	for (uint32_t y = 0; y < Field_Height; ++y)
@@ -475,35 +485,35 @@ void game_init(Game_InstanceBuffer* buffer)
 			uint32_t writeLoc = y * Field_Width + x;
 			buffer->spriteIndicesAndScales[writeLoc * 2] = Field_ImageTable[0];
 			buffer->spriteIndicesAndScales[writeLoc * 2 + 1] = Field_TileScale;
-			buffer->positionX[writeLoc] = (float)x / Field_Width * 2.0f - 1.0f;
-			buffer->positionY[writeLoc] = (float)y / Field_Height * 2.0f - 1.0f;
+			buffer->positionX[writeLoc] = SIMD_FLOAT_TO_HALF((float)x / Field_Width * 2.0f - 1.0f);
+			buffer->positionY[writeLoc] = SIMD_FLOAT_TO_HALF((float)y / Field_Height * 2.0f - 1.0f);
 		}
 	}
 
-	AI_FarmersMoveHotX = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
-	AI_FarmersMoveHotY = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
+	AI_FarmersMoveHotX = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
+	AI_FarmersMoveHotY = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
 	AI_FarmersMoveCold = (AI_FarmerMoveStateCold*)malloc(sizeof(AI_FarmerMoveStateCold) * AI_FarmerCount);
-	AI_FarmersMoveGenX = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
-	AI_FarmersMoveGenY = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
+	AI_FarmersMoveGenX = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
+	AI_FarmersMoveGenY = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
 
-	AI_FarmersFarmHot = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
+	AI_FarmersFarmHot = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
 	AI_FarmersFarmCold = (AI_FarmerFarmStateCold*)malloc(sizeof(AI_FarmerFarmStateCold) * AI_FarmerCount);
-	AI_FarmersFarmGenX = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
-	AI_FarmersFarmGenY = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
+	AI_FarmersFarmGenX = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
+	AI_FarmersFarmGenY = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
 
-	AI_FarmersSearchHot = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
-	AI_FarmersSearchGenX = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
-	AI_FarmersSearchGenY = (float*)_mm_malloc(sizeof(float) * AI_FarmerCount, 64);
+	AI_FarmersSearchHot = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
+	AI_FarmersSearchGenX = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
+	AI_FarmersSearchGenY = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
 
 	SIMD_FarmerRemovalIndices = (int*)_mm_malloc(sizeof(int) * AI_FarmerCount, 64);
 
 	AI_FarmerSearchCount = AI_FarmerCount;
 
-	memset(AI_FarmersSearchGenX, 0, sizeof(float) * AI_FarmerCount);
-	memset(AI_FarmersSearchGenY, 0, sizeof(float) * AI_FarmerCount);
+	memset(AI_FarmersSearchGenX, 0, sizeof(uint16_t) * AI_FarmerCount);
+	memset(AI_FarmersSearchGenY, 0, sizeof(uint16_t) * AI_FarmerCount);
 	for (uint32_t ai = 0; ai < AI_FarmerCount; ++ai)
 	{
-		AI_FarmersSearchHot[ai] = rand_rangef(AI_FarmerSearchSpeedMin, AI_FarmerSearchSpeedMax);
+		AI_FarmersSearchHot[ai] = SIMD_FLOAT_TO_HALF(rand_rangef(AI_FarmerSearchSpeedMin, AI_FarmerSearchSpeedMax));
 	}
 
 	MIST_PROFILE_END("Game", "Game-Init");
@@ -573,8 +583,8 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 
 	uint32_t writeIndex = Field_Width * Field_Height + Field_CropCount;
 
-	memcpy(&buffer->positionX[writeIndex], AI_FarmersSearchGenX, sizeof(float) * AI_FarmerSearchCount);
-	memcpy(&buffer->positionY[writeIndex], AI_FarmersSearchGenY, sizeof(float) * AI_FarmerSearchCount);
+	memcpy(&buffer->positionX[writeIndex], AI_FarmersSearchGenX, sizeof(uint16_t) * AI_FarmerSearchCount);
+	memcpy(&buffer->positionY[writeIndex], AI_FarmersSearchGenY, sizeof(uint16_t) * AI_FarmerSearchCount);
 	__m128i searchAndScale = _mm_set_epi16(FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale);
 	_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[writeIndex * 2], searchAndScale);
 	for (uint32_t i = (4 - writeIndex % 4); i < AI_FarmerSearchCount; i+=4)
@@ -583,8 +593,8 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 	}
 	writeIndex += AI_FarmerSearchCount;
 
-	memcpy(&buffer->positionX[writeIndex], AI_FarmersMoveGenX, sizeof(float) * AI_FarmerMoveCount);
-	memcpy(&buffer->positionY[writeIndex], AI_FarmersMoveGenY, sizeof(float) * AI_FarmerMoveCount);
+	memcpy(&buffer->positionX[writeIndex], AI_FarmersMoveGenX, sizeof(uint16_t) * AI_FarmerMoveCount);
+	memcpy(&buffer->positionY[writeIndex], AI_FarmersMoveGenY, sizeof(uint16_t) * AI_FarmerMoveCount);
 	__m128i moveAndScale = _mm_set_epi16(FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale);
 	_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[writeIndex * 2], moveAndScale);
 	for (uint32_t i = (4 - writeIndex % 4); i < AI_FarmerMoveCount; i+=4)
@@ -593,8 +603,8 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 	}
 	writeIndex += AI_FarmerMoveCount;
 
-	memcpy(&buffer->positionX[writeIndex], AI_FarmersFarmGenX, sizeof(float) * AI_FarmerFarmCount);
-	memcpy(&buffer->positionY[writeIndex], AI_FarmersFarmGenY, sizeof(float) * AI_FarmerFarmCount);
+	memcpy(&buffer->positionX[writeIndex], AI_FarmersFarmGenX, sizeof(uint16_t) * AI_FarmerFarmCount);
+	memcpy(&buffer->positionY[writeIndex], AI_FarmersFarmGenY, sizeof(uint16_t) * AI_FarmerFarmCount);
 	__m128i farmAndScale = _mm_set_epi16(FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale);
 	_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[writeIndex * 2], farmAndScale);
 	for (uint32_t i = (4 - writeIndex % 4); i < AI_FarmerFarmCount; i+=4)

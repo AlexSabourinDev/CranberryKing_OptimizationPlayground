@@ -98,8 +98,8 @@ void core_init(void)
 			.attrs =
 				{
 					[0] = {.name = "spriteAndScale",.format = SG_VERTEXFORMAT_SHORT2N, .offset = offsetof(Game_InstanceBuffer, spriteIndicesAndScales) },
-					[1] = {.name = "positionX",.format = SG_VERTEXFORMAT_FLOAT, .offset = offsetof(Game_InstanceBuffer, positionX) },
-					[2] = {.name = "positionY",.format = SG_VERTEXFORMAT_FLOAT, .offset = offsetof(Game_InstanceBuffer, positionY) }
+					[1] = {.name = "positionX",.format = SG_VERTEXFORMAT_HALF, .offset = offsetof(Game_InstanceBuffer, positionX) },
+					[2] = {.name = "positionY",.format = SG_VERTEXFORMAT_HALF, .offset = offsetof(Game_InstanceBuffer, positionY) }
 				}
 		},
 			.shader = shader,
