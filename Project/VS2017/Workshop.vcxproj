@@ -85,7 +85,7 @@
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalOptions>-Ofast -mavx -mbmi2 -mavx2 -mf16c %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-Ofast -mavx -mbmi2 -mavx2 -mf16c -mfma %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -96,7 +96,7 @@
       <ConformanceMode>true</ConformanceMode>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <MinimalRebuild />
-      <AdditionalOptions>-Ofast -mavx -mbmi2 -mavx2 -mf16c %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-Ofast -mavx -mbmi2 -mavx2 -mf16c -mfma %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -107,7 +107,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalOptions>-Ofast -mavx -mbmi2 -mavx2 -mf16c %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-Ofast -mavx -mbmi2 -mavx2 -mf16c -mfma %(AdditionalOptions)</AdditionalOptions>
       <FloatingPointModel>Fast</FloatingPointModel>
     </ClCompile>
     <Link>
@@ -124,7 +124,7 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <MinimalRebuild />
-      <AdditionalOptions>-Ofast -mavx -mbmi2 -mavx2 -mf16c %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-Ofast -mavx -mbmi2 -mavx2 -mf16c -mfma %(AdditionalOptions)</AdditionalOptions>
       <FloatingPointModel>Fast</FloatingPointModel>
     </ClCompile>
     <Link>
