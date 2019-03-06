@@ -1,14 +1,4 @@
 ﻿clang-cl.exe : warning : argument unused during compilation: '/GL' [-Wunused-command-line-argument]
-..\..\Source\game.c(298,13): warning : unused variable 'nextRemoval' [-Wunused-variable]
-                          uint32_t nextRemoval = SIMD_FarmerRemovalIndices[i + 2];
-                                   ^
-..\..\Source\game.c(389,8): warning : unused variable 'nextRemoval' [-Wunused-variable]
-                          int nextRemoval = SIMD_FarmerRemovalIndices[i + 2];
-                              ^
-..\..\Source\game.c(453,8): warning : unused variable 'nextRemoval' [-Wunused-variable]
-                          int nextRemoval = SIMD_FarmerRemovalIndices[i + 2];
-                              ^
-  3 warnings generated.
   In file included from ..\..\Source\main.c:7:
 ..\..\Source/3rd/sokol_app.h(793,29): warning : unused function '_sapp_translate_key' [-Wunused-function]
   _SOKOL_PRIVATE sapp_keycode _sapp_translate_key(int scan_code) {
