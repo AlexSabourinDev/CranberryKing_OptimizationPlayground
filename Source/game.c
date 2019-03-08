@@ -40,6 +40,11 @@ float math_minf(float l, float r)
 	return l < r ? l : r;
 }
 
+int32_t math_maxi(int32_t l, int32_t r)
+{
+	return l > r ? l : r;
+}
+
 uint32_t math_max(uint32_t l, uint32_t r)
 {
 	return l > r ? l : r;
@@ -157,8 +162,9 @@ void field_tick(float delta)
 
 		int bitMask = (1 << math_min(Field_CropCount - i, 16)) - 1;
 
-		__m256i cmpRes = _mm256_cmpeq_epi16(_mm256_max_epi16(lifetime, zeroI), zeroI);
-		int indexMask = _mm256_movemask_epi8(_mm256_packs_epi16(cmpRes, zeroI)) & bitMask;
+		__m256i cmpRes = _mm256_cmpgt_epi16(zeroI, lifetime);
+		uint32_t moveMask = _mm256_movemask_epi8(cmpRes);
+		int indexMask = _pext_u32(moveMask, 0x55555555) & bitMask;
 
 		if (indexMask != 0)
 		{
@@ -170,7 +176,7 @@ void field_tick(float delta)
 			grownCropCount += _mm_popcnt_u32(indexMask & 0x00FF);
 
 			__m256i next8Indices = _mm256_set_epi32(i + 8, i + 8, i + 8, i + 8, i + 8, i + 8, i + 8, i + 8);
-			__m256i nextIndexAdd = simd_moveMaskToIndexMask(indexMask & 0xFF00);
+			__m256i nextIndexAdd = simd_moveMaskToIndexMask((indexMask & 0xFF00) >> 8);
 			next8Indices = _mm256_add_epi32(next8Indices, nextIndexAdd);
 
 			_mm256_storeu_si256((__m256i*)(SIMD_FarmerRemovalIndices + grownCropCount), next8Indices);
@@ -178,7 +184,7 @@ void field_tick(float delta)
 		}
 	}
 
-	for (uint32_t i = 0; i < grownCropCount; i++)
+	for (int32_t i = grownCropCount - 1; i >= 0; i--)
 	{
 		int r = SIMD_FarmerRemovalIndices[i];
 		Field_Crop* crop = &Field_Crops[r];
@@ -266,8 +272,9 @@ void ai_tick(float delta)
 
 			int bitMask = (1 << math_min(AI_FarmerSearchCount - i, 16)) - 1;
 
-			__m256i cmpRes = _mm256_cmpeq_epi16(_mm256_max_epi16(farmerSearchTimer, zeroI), zeroI);
-			int indexMask = _mm256_movemask_epi8(_mm256_packs_epi16(cmpRes, zeroI)) & bitMask;
+			__m256i cmpRes = _mm256_cmpgt_epi16(zeroI, farmerSearchTimer);
+			uint32_t moveMask = _mm256_movemask_epi8(cmpRes);
+			int indexMask = _pext_u32(moveMask, 0x55555555) & bitMask;
 
 			if (indexMask != 0)
 			{
@@ -277,9 +284,9 @@ void ai_tick(float delta)
 
 				_mm256_storeu_si256((__m256i*)(SIMD_FarmerRemovalIndices + removedFarmerCount), indices);
 				removedFarmerCount += _mm_popcnt_u32(indexMask & 0x00FF);
+				__m256i next8IndexAdd = simd_moveMaskToIndexMask((indexMask & 0xFF00) >> 8);
 
 				__m256i next8Indices = _mm256_set_epi32(i + 8, i + 8, i + 8, i + 8, i + 8, i + 8, i + 8, i + 8);
-				__m256i next8IndexAdd = simd_moveMaskToIndexMask(indexMask & 0xFF00);
 				next8Indices = _mm256_add_epi32(next8Indices, next8IndexAdd);
 
 				_mm256_storeu_si256((__m256i*)(SIMD_FarmerRemovalIndices + removedFarmerCount), next8Indices);
@@ -291,11 +298,11 @@ void ai_tick(float delta)
 		uint32_t tileIndex2 = rand_range(0U, Field_Width * Field_Height);
 		uint32_t tileIndex3 = rand_range(0U, Field_Width * Field_Height);
 		_mm_prefetch((const char*)(Field_Tiles + tileIndex3), _MM_HINT_T0);
-		for(uint32_t i = 0; i < removedFarmerCount; i++)
+		for(int32_t i = removedFarmerCount - 1; i >= 0; i--)
 		{
 			uint32_t r = SIMD_FarmerRemovalIndices[i];
 
-			uint32_t nextRemoval = SIMD_FarmerRemovalIndices[i + 2];
+			uint32_t nextRemoval = SIMD_FarmerRemovalIndices[math_maxi(i - 2, 0)];
 			_mm_prefetch((const char*)(AI_FarmersSearchGenX + nextRemoval), _MM_HINT_T0);
 			_mm_prefetch((const char*)(AI_FarmersSearchGenY + nextRemoval), _MM_HINT_T0);
 
@@ -382,11 +389,11 @@ void ai_tick(float delta)
 		}
 
 
-		for(uint32_t i = 0; i < removedFarmerCount; i++)
+		for(int32_t i = removedFarmerCount - 1; i >= 0; i--)
 		{
 			int r = SIMD_FarmerRemovalIndices[i];
 
-			int nextRemoval = SIMD_FarmerRemovalIndices[i + 2];
+			int nextRemoval = SIMD_FarmerRemovalIndices[math_maxi(i - 2, 0)];
 			_mm_prefetch((const char*)(AI_FarmersMoveCold + nextRemoval), _MM_HINT_T0);
 			_mm_prefetch((const char*)(AI_FarmersMoveGenX + nextRemoval), _MM_HINT_T0);
 			_mm_prefetch((const char*)(AI_FarmersMoveGenY + nextRemoval), _MM_HINT_T0);
@@ -425,8 +432,9 @@ void ai_tick(float delta)
 
 			int bitMask = (1 << math_min(previousFarmerFarmCount - i, 16)) - 1;
 
-			__m256i cmpRes = _mm256_cmpeq_epi16(_mm256_max_epi16(farmerFarmTimer, zeroI), zeroI);
-			int indexMask = _mm256_movemask_epi8(_mm256_packs_epi16(cmpRes, zeroI)) & bitMask;
+			__m256i cmpRes = _mm256_cmpgt_epi16(zeroI, farmerFarmTimer);
+			uint32_t moveMask = _mm256_movemask_epi8(cmpRes);
+			int indexMask = _pext_u32(moveMask, 0x55555555) & bitMask;
 
 			if (indexMask != 0)
 			{
@@ -438,7 +446,7 @@ void ai_tick(float delta)
 				removedFarmerCount += _mm_popcnt_u32(indexMask & 0x00FF);
 
 				__m256i next8Indices = _mm256_set_epi32(i + 8, i + 8, i + 8, i + 8, i + 8, i + 8, i + 8, i + 8);
-				__m256i next8IndexAdd = simd_moveMaskToIndexMask(indexMask & 0xFF00);
+				__m256i next8IndexAdd = simd_moveMaskToIndexMask((indexMask & 0xFF00) >> 8);
 				next8Indices = _mm256_add_epi32(next8Indices, next8IndexAdd);
 
 				_mm256_storeu_si256((__m256i*)(SIMD_FarmerRemovalIndices + removedFarmerCount), next8Indices);
@@ -446,11 +454,11 @@ void ai_tick(float delta)
 			}
 		}
 
-		for(uint32_t i = 0; i < removedFarmerCount; i++)
+		for(int32_t i = removedFarmerCount - 1; i >= 0; i--)
 		{
 			int r = SIMD_FarmerRemovalIndices[i];
 
-			int nextRemoval = SIMD_FarmerRemovalIndices[i + 2];
+			int nextRemoval = SIMD_FarmerRemovalIndices[math_maxi(i - 2, 0)];
 			_mm_prefetch((const char*)(AI_FarmersFarmCold + nextRemoval), _MM_HINT_T0);
 			_mm_prefetch((const char*)(AI_FarmersFarmGenX + nextRemoval), _MM_HINT_T0);
 			_mm_prefetch((const char*)(AI_FarmersFarmGenY + nextRemoval), _MM_HINT_T0);
