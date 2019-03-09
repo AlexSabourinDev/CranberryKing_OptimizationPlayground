@@ -9,7 +9,6 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
-#include <assert.h>
 
 #include <xmmintrin.h>
 #include <emmintrin.h>
@@ -78,7 +77,41 @@ __m256i simd_moveMaskToIndexMask(unsigned int mask /* from movmskps */)
 	return shufmask;
 }
 
-static int* SIMD_FarmerRemovalIndices = NULL;
+// https://godbolt.org/z/yzTCPV
+void simd_streamMemCpy(__m256i* dstWrite, __m256i* srcRead, size_t size)
+{
+	if (size == 0)
+	{
+		return;
+	}
+
+	__m256i* dstEnd = dstWrite + (size >> 5);
+	for (; dstWrite <= dstEnd; dstWrite += 2, srcRead += 2)
+	{
+		__m256i src256 = _mm256_stream_load_si256(srcRead);
+		_mm256_stream_si256(dstWrite, src256);
+		__m256i src256_2 = _mm256_stream_load_si256(srcRead + 1);
+		_mm256_stream_si256(dstWrite + 1, src256_2);
+	}
+}
+
+// https://godbolt.org/z/WvzCC3
+void simd_memSetToValue(__m256i* dstWrite, __m256i value, size_t size)
+{
+	if (size == 0)
+	{
+		return;
+	}
+
+	__m256i* dstEnd = dstWrite + (size >> 5);
+	for (; dstWrite <= dstEnd; dstWrite += 2)
+	{
+		_mm256_stream_si256(dstWrite, value);
+		_mm256_stream_si256(dstWrite + 1, value);
+	}
+}
+
+static unsigned int* SIMD_FarmerRemovalIndices = NULL;
 
 // Crops
 typedef enum
@@ -159,7 +192,7 @@ void field_tick(float delta)
 		lifetime = _mm256_sub_epi16(lifetime, delta256);
 		_mm256_store_si256((__m256i*)(Field_CropLifetimes + i), lifetime);
 
-		int bitMask = (1 << math_min(Field_CropCount - i, 16)) - 1;
+		unsigned int bitMask = (1 << math_min(Field_CropCount - i, 16)) - 1;
 
 		__m256i cmpRes = _mm256_cmpgt_epi16(zeroI, lifetime);
 		uint32_t moveMask = _mm256_movemask_epi8(cmpRes);
@@ -185,7 +218,7 @@ void field_tick(float delta)
 
 	for (int32_t i = grownCropCount - 1; i >= 0; i--)
 	{
-		int r = SIMD_FarmerRemovalIndices[i];
+		unsigned int r = SIMD_FarmerRemovalIndices[i];
 		Field_Crop* crop = &Field_Crops[r];
 
 		Field_Tile* tile = &Field_Tiles[crop->tileIndex];
@@ -227,9 +260,8 @@ const int16_t FarmerState_Farm = (int16_t)(2.0f / 11.0f * INT16_MAX);
 #define AI_TimePrecision 100
 
 const float AI_FarmerSpeed = 0.5f;
-const float AI_FarmerCropRadius = 0.005f;
-const int16_t AI_FarmerSearchSpeedMin = 0;
-const int16_t AI_FarmerSearchSpeedMax = 1 * AI_TimePrecision;
+const int8_t AI_FarmerSearchSpeedMin = 0;
+const int8_t AI_FarmerSearchSpeedMax = 1 * AI_TimePrecision;
 const int16_t AI_FarmerFarmSpeedMin = 3 * AI_TimePrecision;
 const int16_t AI_FarmerFarmSpeedMax = 5 * AI_TimePrecision;
 #define AI_FarmerCount 1000000
@@ -410,7 +442,7 @@ void ai_tick(float delta)
 			_mm_store_si128((__m128i*)(AI_FarmersMoveGenX + i), _mm256_cvtps_ph(genFarmerX, _MM_FROUND_NO_EXC));
 			_mm_store_si128((__m128i*)(AI_FarmersMoveGenY + i), _mm256_cvtps_ph(genFarmerY, _MM_FROUND_NO_EXC));
 
-			int bitMask = (1 << math_min(previousFarmerMoveCount - i, 8)) - 1;
+			unsigned int bitMask = (1 << math_min(previousFarmerMoveCount - i, 8)) - 1;
 
 			// Since we're calculating reciprocals, the larger number is smaller
 			// So instead of whether our velocity is larger than our distance,
@@ -418,7 +450,7 @@ void ai_tick(float delta)
 			// vel = 1, dist = 0.5 vel > dist ? we passed it!
 			// rvel = 1/1, dist = 1/0.5 rvel < rdist ? we passed it!
 			__m256 cmpRes = _mm256_cmp_ps(rvelMag, rmag, _CMP_LT_OQ);
-			int indexMask = _mm256_movemask_ps(cmpRes) & bitMask;
+			unsigned int indexMask = _mm256_movemask_ps(cmpRes) & bitMask;
 
 			if (indexMask != 0)
 			{
@@ -434,7 +466,7 @@ void ai_tick(float delta)
 
 		for(int32_t i = removedFarmerCount - 1; i >= 0; i--)
 		{
-			int r = SIMD_FarmerRemovalIndices[i];
+			unsigned int r = SIMD_FarmerRemovalIndices[i];
 
 			int nextRemoval = SIMD_FarmerRemovalIndices[math_maxi(i - 2, 0)];
 			_mm_prefetch((const char*)(AI_FarmersMoveCold + nextRemoval), _MM_HINT_T0);
@@ -483,7 +515,7 @@ void ai_tick(float delta)
 
 			uint64_t bitMask = (1ULL << math_min(previousFarmerFarmCount - i, 32ULL)) - 1ULL;
 
-			__m256i cmpRes = _mm256_cmpgt_epi16(zeroI, farmerFarmTimer);
+			__m256i cmpRes = _mm256_cmpgt_epi8(zeroI, farmerFarmTimer);
 			uint32_t moveMask = _mm256_movemask_epi8(cmpRes);
 			uint32_t indexMask = moveMask & bitMask;
 
@@ -645,7 +677,7 @@ void game_init(Game_InstanceBuffer* buffer)
 	AI_FarmersSearchGenX = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
 	AI_FarmersSearchGenY = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
 
-	SIMD_FarmerRemovalIndices = (int*)_mm_malloc(sizeof(int) * AI_FarmerCount, 64);
+	SIMD_FarmerRemovalIndices = (unsigned int*)_mm_malloc(sizeof(unsigned int) * AI_FarmerCount, 64);
 
 	memset(AI_FarmersSearchGenX, 0, sizeof(uint16_t) * AI_FarmerCount);
 	memset(AI_FarmersSearchGenY, 0, sizeof(uint16_t) * AI_FarmerCount);
@@ -719,54 +751,94 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 {
 	MIST_PROFILE_BEGIN("Game", "Game-GenInstanceBuffer");
 
-	for (uint32_t i = 0; i < Field_TileDrawCommandCount; ++i)
-	{
-		Field_TileDrawCommand* command = &Field_TileDrawCommands[i];
-		buffer->spriteIndicesAndScales[command->writeIndex * 2] = command->spriteIndex;
-	}
-	Field_TileDrawCommandCount = 0;
+	uint32_t writeIndex = 0;
 
-	for (uint32_t i = 0; i < Field_CropDrawCommandCount; i++)
 	{
-		Field_CropDrawCommand* command = &Field_CropDrawCommands[i];
-		buffer->spriteIndicesAndScales[command->writeIndex * 2] = command->spriteIndex;
-		buffer->spriteIndicesAndScales[command->writeIndex * 2 + 1] = Field_TileScale;
-		buffer->positionX[command->writeIndex] = command->posX;
-		buffer->positionY[command->writeIndex] = command->posY;
+		for (uint32_t i = 0; i < Field_TileDrawCommandCount; ++i)
+		{
+			Field_TileDrawCommand* command = &Field_TileDrawCommands[i];
+			buffer->spriteIndicesAndScales[command->writeIndex * 2] = command->spriteIndex;
+		}
+		Field_TileDrawCommandCount = 0;
 	}
-	Field_CropDrawCommandCount = 0;
 
-	uint32_t writeIndex = Field_Width * Field_Height + Field_CropCount;
-
-	memcpy(&buffer->positionX[writeIndex], AI_FarmersSearchGenX, sizeof(uint16_t) * AI_FarmerSearchCount);
-	memcpy(&buffer->positionY[writeIndex], AI_FarmersSearchGenY, sizeof(uint16_t) * AI_FarmerSearchCount);
-	__m128i searchAndScale = _mm_set_epi16(FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale, FarmerState_Search, AI_FarmerScale);
-	_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[writeIndex * 2], searchAndScale);
-	for (uint32_t i = (4 - writeIndex % 4); i < AI_FarmerSearchCount; i+=4)
 	{
-		_mm_stream_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], searchAndScale);
-	}
-	writeIndex += AI_FarmerSearchCount;
+		for (uint32_t i = 0; i < Field_CropDrawCommandCount; i++)
+		{
+			Field_CropDrawCommand* command = &Field_CropDrawCommands[i];
+			buffer->spriteIndicesAndScales[command->writeIndex * 2] = command->spriteIndex;
+			buffer->spriteIndicesAndScales[command->writeIndex * 2 + 1] = Field_TileScale;
+			buffer->positionX[command->writeIndex] = command->posX;
+			buffer->positionY[command->writeIndex] = command->posY;
+		}
 
-	memcpy(&buffer->positionX[writeIndex], AI_FarmersMoveGenX, sizeof(uint16_t) * AI_FarmerMoveCount);
-	memcpy(&buffer->positionY[writeIndex], AI_FarmersMoveGenY, sizeof(uint16_t) * AI_FarmerMoveCount);
-	__m128i moveAndScale = _mm_set_epi16(FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale, FarmerState_Move, AI_FarmerScale);
-	_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[writeIndex * 2], moveAndScale);
-	for (uint32_t i = (4 - writeIndex % 4); i < AI_FarmerMoveCount; i+=4)
-	{
-		_mm_stream_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], moveAndScale);
-	}
-	writeIndex += AI_FarmerMoveCount;
+		// Repeat the last crop to align the writeIndex
+		uint32_t tilePlusCropCount = (Field_Width * Field_Height + Field_CropCount);
+		uint32_t remainingWrites = 32 - tilePlusCropCount % 32;
+		for (uint32_t i = 0; i < remainingWrites; i++)
+		{
+			buffer->spriteIndicesAndScales[(tilePlusCropCount + i) * 2] = buffer->spriteIndicesAndScales[(tilePlusCropCount - 1) * 2];
+			buffer->spriteIndicesAndScales[(tilePlusCropCount + i) * 2 + 1] = buffer->spriteIndicesAndScales[(tilePlusCropCount - 1) * 2 + 1];
+			buffer->positionX[tilePlusCropCount + i] = buffer->positionX[tilePlusCropCount - 1];
+			buffer->positionY[tilePlusCropCount + i] = buffer->positionY[tilePlusCropCount - 1];
+		}
+		Field_CropDrawCommandCount = 0;
 
-	memcpy(&buffer->positionX[writeIndex], AI_FarmersFarmGenX, sizeof(uint16_t) * AI_FarmerFarmCount);
-	memcpy(&buffer->positionY[writeIndex], AI_FarmersFarmGenY, sizeof(uint16_t) * AI_FarmerFarmCount);
-	__m128i farmAndScale = _mm_set_epi16(FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale, FarmerState_Farm, AI_FarmerScale);
-	_mm_storeu_si128((__m128i*)&buffer->spriteIndicesAndScales[writeIndex * 2], farmAndScale);
-	for (uint32_t i = (4 - writeIndex % 4); i < AI_FarmerFarmCount; i+=4)
-	{
-		_mm_stream_si128((__m128i*)&buffer->spriteIndicesAndScales[(writeIndex + i) * 2], farmAndScale);
+		writeIndex = Field_Width * Field_Height + Field_CropCount + remainingWrites;
 	}
-	writeIndex += AI_FarmerFarmCount;
+
+	{
+		simd_streamMemCpy((__m256i*)&buffer->positionX[writeIndex], (__m256i*)AI_FarmersSearchGenX, sizeof(uint16_t) * AI_FarmerSearchCount);
+		simd_streamMemCpy((__m256i*)&buffer->positionY[writeIndex], (__m256i*)AI_FarmersSearchGenY, sizeof(uint16_t) * AI_FarmerSearchCount);
+
+		__m256i searchAndScale = _mm256_set1_epi32((uint32_t)FarmerState_Search | ((uint32_t)AI_FarmerScale << 16));
+		simd_memSetToValue((__m256i*)(buffer->spriteIndicesAndScales + writeIndex * 2), searchAndScale, AI_FarmerSearchCount * sizeof(uint32_t));
+
+		uint32_t remainingSearchWrites = 32 - (AI_FarmerSearchCount % 32);
+		__m256i writeSearchIndexAndScale = _mm256_set1_epi32(buffer->spriteIndicesAndScales[(writeIndex + AI_FarmerSearchCount - 1) * 2]);
+		__m256i positionX = _mm256_set1_epi16(buffer->positionX[writeIndex + AI_FarmerSearchCount - 1]);
+		__m256i positionY = _mm256_set1_epi16(buffer->positionY[writeIndex + AI_FarmerSearchCount - 1]);
+		for (uint32_t i = 0; i < remainingSearchWrites; i += 16)
+		{
+			_mm256_storeu_si256((__m256i*)(buffer->spriteIndicesAndScales + (writeIndex + AI_FarmerSearchCount + i * 16) * 2), writeSearchIndexAndScale);
+			_mm256_storeu_si256((__m256i*)(buffer->spriteIndicesAndScales + (writeIndex + AI_FarmerSearchCount + i * 16 + 16) * 2), writeSearchIndexAndScale);
+			_mm256_storeu_si256((__m256i*)(buffer->positionX + writeIndex + AI_FarmerSearchCount + i * 16), positionX);
+			_mm256_storeu_si256((__m256i*)(buffer->positionY + writeIndex + AI_FarmerSearchCount + i * 16), positionY);
+		}
+
+		writeIndex += AI_FarmerSearchCount + remainingSearchWrites;
+	}
+
+	{
+		simd_streamMemCpy((__m256i*)&buffer->positionX[writeIndex], (__m256i*)AI_FarmersMoveGenX, sizeof(uint16_t) * AI_FarmerMoveCount);
+		simd_streamMemCpy((__m256i*)&buffer->positionY[writeIndex], (__m256i*)AI_FarmersMoveGenY, sizeof(uint16_t) * AI_FarmerMoveCount);
+
+		__m256i moveAndScale = _mm256_set1_epi32((uint32_t)FarmerState_Move | ((uint32_t)AI_FarmerScale << 16));
+		simd_memSetToValue((__m256i*)(buffer->spriteIndicesAndScales + writeIndex * 2), moveAndScale, AI_FarmerMoveCount * sizeof(uint32_t));
+
+		uint32_t remainingMoveWrites = 32 - (AI_FarmerMoveCount % 32);
+		__m256i writeMoveIndexAndScale = _mm256_set1_epi32(buffer->spriteIndicesAndScales[(writeIndex + AI_FarmerMoveCount - 1) * 2]);
+		__m256i positionX = _mm256_set1_epi16(buffer->positionX[writeIndex + AI_FarmerMoveCount - 1]);
+		__m256i positionY = _mm256_set1_epi16(buffer->positionY[writeIndex + AI_FarmerMoveCount - 1]);
+		for (uint32_t i = 0; i < remainingMoveWrites; i += 16)
+		{
+			_mm256_storeu_si256((__m256i*)(buffer->spriteIndicesAndScales + (writeIndex + AI_FarmerMoveCount + i * 16) * 2), writeMoveIndexAndScale);
+			_mm256_storeu_si256((__m256i*)(buffer->spriteIndicesAndScales + (writeIndex + AI_FarmerMoveCount + i * 16 + 16) * 2), writeMoveIndexAndScale);
+			_mm256_storeu_si256((__m256i*)(buffer->positionX + writeIndex + AI_FarmerMoveCount + i * 16), positionX);
+			_mm256_storeu_si256((__m256i*)(buffer->positionY + writeIndex + AI_FarmerMoveCount + i * 16), positionY);
+		}
+		writeIndex += AI_FarmerMoveCount + remainingMoveWrites;
+	}
+
+	{
+		simd_streamMemCpy((__m256i*)&buffer->positionX[writeIndex], (__m256i*)AI_FarmersFarmGenX, sizeof(uint16_t) * AI_FarmerFarmCount);
+		simd_streamMemCpy((__m256i*)&buffer->positionY[writeIndex], (__m256i*)AI_FarmersFarmGenY, sizeof(uint16_t) * AI_FarmerFarmCount);
+
+		__m256i farmAndScale = _mm256_set1_epi32((uint32_t)FarmerState_Farm | ((uint32_t)AI_FarmerScale << 16));
+		simd_memSetToValue((__m256i*)(buffer->spriteIndicesAndScales + writeIndex * 2), farmAndScale, AI_FarmerFarmCount * sizeof(uint32_t));
+
+		writeIndex += AI_FarmerFarmCount;
+	}
 
 	MIST_PROFILE_END("Game", "Game-GenInstanceBuffer");
 
