@@ -77,7 +77,7 @@ __m256i simd_moveMaskToIndexMask(unsigned int mask /* from movmskps */)
 	return shufmask;
 }
 
-// https://godbolt.org/z/yzTCPV
+// https://godbolt.org/z/jxXHVJ
 void simd_streamMemCpy(__m256i* dstWrite, __m256i* srcRead, size_t size)
 {
 	if (size == 0)
@@ -86,16 +86,14 @@ void simd_streamMemCpy(__m256i* dstWrite, __m256i* srcRead, size_t size)
 	}
 
 	__m256i* dstEnd = dstWrite + (size >> 5);
-	for (; dstWrite <= dstEnd; dstWrite += 2, srcRead += 2)
+	for (; dstWrite <= dstEnd; dstWrite += 1, srcRead += 1)
 	{
 		__m256i src256 = _mm256_stream_load_si256(srcRead);
 		_mm256_stream_si256(dstWrite, src256);
-		__m256i src256_2 = _mm256_stream_load_si256(srcRead + 1);
-		_mm256_stream_si256(dstWrite + 1, src256_2);
 	}
 }
 
-// https://godbolt.org/z/WvzCC3
+// https://godbolt.org/z/5wjfO3
 void simd_memSetToValue(__m256i* dstWrite, __m256i value, size_t size)
 {
 	if (size == 0)
@@ -104,10 +102,9 @@ void simd_memSetToValue(__m256i* dstWrite, __m256i value, size_t size)
 	}
 
 	__m256i* dstEnd = dstWrite + (size >> 5);
-	for (; dstWrite <= dstEnd; dstWrite += 2)
+	for (; dstWrite <= dstEnd; dstWrite += 1)
 	{
 		_mm256_stream_si256(dstWrite, value);
-		_mm256_stream_si256(dstWrite + 1, value);
 	}
 }
 
