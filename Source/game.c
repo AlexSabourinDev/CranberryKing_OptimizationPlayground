@@ -149,9 +149,7 @@ void field_tick(float delta)
 	MIST_PROFILE_BEGIN("Game", "Field-Tick");
 
 	int16_t deltaI = (int16_t)(delta * Field_TimePrecision);
-	__m256i delta256 = _mm256_set_epi16(
-		deltaI, deltaI, deltaI, deltaI, deltaI, deltaI, deltaI, deltaI,
-		deltaI, deltaI, deltaI, deltaI, deltaI, deltaI, deltaI, deltaI);
+	__m256i delta256 = _mm256_set1_epi16(deltaI);
 	__m256i zeroI = _mm256_setzero_si256();
 
 	uint32_t grownCropCount = 0;
@@ -226,7 +224,7 @@ const int16_t FarmerState_Search = 0;
 const int16_t FarmerState_Move = (int16_t)(1.0f / 11.0f * INT16_MAX);
 const int16_t FarmerState_Farm = (int16_t)(2.0f / 11.0f * INT16_MAX);
 
-#define AI_TimePrecision 1000
+#define AI_TimePrecision 100
 
 const float AI_FarmerSpeed = 0.5f;
 const float AI_FarmerCropRadius = 0.005f;
@@ -246,10 +244,10 @@ static uint16_t* AI_FarmersMoveGenY = NULL;
 static uint32_t AI_FarmerFarmCount = 0;
 
 #define AI_FarmerFarmBucketCount 6
-static int16_t* AI_FarmersFarmHotBuckets[AI_FarmerFarmBucketCount] = { NULL };
+static int8_t* AI_FarmersFarmHotBuckets[AI_FarmerFarmBucketCount] = { NULL };
 static uint32_t* AI_FarmersFarmHotBucketIndices[AI_FarmerFarmBucketCount] = { NULL };
 static int32_t AI_FarmersFarmHotBucketCounts[AI_FarmerFarmBucketCount] = { 0 };
-static int16_t AI_FarmersFarmBucketTransitionTimer = 0;
+static int8_t AI_FarmersFarmBucketTransitionTimer = 0;
 static uint32_t AI_FarmersFarmFineTimerBucket = 0;
 
 static uint32_t* AI_FarmersFarmCold = NULL;
@@ -258,10 +256,10 @@ static uint16_t* AI_FarmersFarmGenY = NULL;
 static uint32_t AI_FarmerSearchCount = 0;
 
 #define AI_FarmerSearchBucketCount 6
-static int16_t* AI_FarmersSearchHotBuckets[AI_FarmerSearchBucketCount] = { NULL };
+static int8_t* AI_FarmersSearchHotBuckets[AI_FarmerSearchBucketCount] = { NULL };
 static uint32_t* AI_FarmersSearchHotBucketIndices[AI_FarmerSearchBucketCount] = { NULL };
 static int32_t AI_FarmersSearchHotBucketCounts[AI_FarmerSearchBucketCount] = { 0 };
-static int16_t AI_FarmersSearchBucketTransitionTimer = 0;
+static int8_t AI_FarmersSearchBucketTransitionTimer = 0;
 static uint32_t AI_FarmersSearchFineTimerBucket = 0;
 
 static uint16_t* AI_FarmersSearchGenX = NULL;
@@ -276,43 +274,39 @@ void ai_tick(float delta)
 
 	uint32_t previousFarmerMoveCount = AI_FarmerMoveCount;
 	{
-		int16_t deltaI = (int16_t)(delta * AI_TimePrecision);
-		__m256i delta256 = _mm256_set_epi16(
-			deltaI, deltaI, deltaI, deltaI, deltaI, deltaI, deltaI, deltaI,
-			deltaI, deltaI, deltaI, deltaI , deltaI, deltaI, deltaI , deltaI);
+		int8_t deltaI = (int8_t)(delta * AI_TimePrecision);
+		__m256i delta256 = _mm256_set1_epi8(deltaI);
 		__m256i zeroI = _mm256_setzero_si256();
 
-		int16_t* activeFineBucket = AI_FarmersSearchHotBuckets[AI_FarmersSearchFineTimerBucket];
+		int8_t* activeFineBucket = AI_FarmersSearchHotBuckets[AI_FarmersSearchFineTimerBucket];
 
 		uint32_t farmerCount = AI_FarmersSearchHotBucketCounts[AI_FarmersSearchFineTimerBucket];
 		uint32_t removedFarmerCount = 0;
-		for (uint32_t i = 0; i < farmerCount; i+=16)
+		for (uint32_t i = 0; i < farmerCount; i+=32)
 		{
 			__m256i farmerSearchTimer = _mm256_load_si256((__m256i*)(activeFineBucket + i));
-			farmerSearchTimer = _mm256_sub_epi16(farmerSearchTimer, delta256);
+			farmerSearchTimer = _mm256_sub_epi8(farmerSearchTimer, delta256);
 			_mm256_store_si256((__m256i*)(activeFineBucket + i), farmerSearchTimer);
 
-			int bitMask = (1 << math_min(farmerCount - i, 16)) - 1;
+			uint64_t bitMask = (1ULL << math_min(farmerCount - i, 32ULL)) - 1ULL;
 
-			__m256i cmpRes = _mm256_cmpgt_epi16(zeroI, farmerSearchTimer);
+			__m256i cmpRes = _mm256_cmpgt_epi8(zeroI, farmerSearchTimer);
 			uint32_t moveMask = _mm256_movemask_epi8(cmpRes);
-			int indexMask = _pext_u32(moveMask, 0x55555555) & bitMask;
+			uint32_t indexMask = moveMask & bitMask;
 
 			if (indexMask != 0)
 			{
-				__m256i indices = _mm256_set_epi32(i, i, i, i, i, i, i, i);
-				__m256i indexAdd = simd_moveMaskToIndexMask(indexMask & 0x00FF);
-				indices = _mm256_add_epi32(indices, indexAdd);
+				for(uint32_t maskI = 0; maskI < 4; maskI++)
+				{
+					uint32_t shiftedMask = indexMask & (0x000000FF << (maskI * 8));
 
-				_mm256_storeu_si256((__m256i*)(SIMD_FarmerRemovalIndices + removedFarmerCount), indices);
-				removedFarmerCount += _mm_popcnt_u32(indexMask & 0x00FF);
-				__m256i next8IndexAdd = simd_moveMaskToIndexMask((indexMask & 0xFF00) >> 8);
+					__m256i indices = _mm256_set1_epi32(i + 8 * maskI);
+					__m256i indexAdd = simd_moveMaskToIndexMask(shiftedMask >> (maskI * 8));
+					indices = _mm256_add_epi32(indices, indexAdd);
 
-				__m256i next8Indices = _mm256_set_epi32(i + 8, i + 8, i + 8, i + 8, i + 8, i + 8, i + 8, i + 8);
-				next8Indices = _mm256_add_epi32(next8Indices, next8IndexAdd);
-
-				_mm256_storeu_si256((__m256i*)(SIMD_FarmerRemovalIndices + removedFarmerCount), next8Indices);
-				removedFarmerCount += _mm_popcnt_u32(indexMask & 0xFF00);
+					_mm256_storeu_si256((__m256i*)(SIMD_FarmerRemovalIndices + removedFarmerCount), indices);
+					removedFarmerCount += _mm_popcnt_u32(shiftedMask);
+				}
 			}
 		}
 
@@ -393,8 +387,8 @@ void ai_tick(float delta)
 	{
 		float v = AI_FarmerSpeed * delta;
 		float rv = 1.0f / v;
-		__m256 velMag = _mm256_set_ps(v, v, v, v, v, v, v, v);
-		__m256 rvelMag = _mm256_set_ps(rv, rv, rv, rv, rv, rv, rv, rv);
+		__m256 velMag = _mm256_set1_ps(v);
+		__m256 rvelMag = _mm256_set1_ps(rv);
 
 		uint32_t removedFarmerCount = 0;
 
@@ -474,42 +468,38 @@ void ai_tick(float delta)
 	{
 		uint32_t removedFarmerCount = 0;
 
-		int16_t deltaI = (int16_t)(delta * AI_TimePrecision);
-		__m256i delta256 = _mm256_set_epi16(
-			deltaI, deltaI, deltaI, deltaI, deltaI, deltaI, deltaI, deltaI,
-			deltaI, deltaI, deltaI, deltaI, deltaI, deltaI, deltaI, deltaI);
+		int8_t deltaI = (int8_t)(delta * AI_TimePrecision);
+		__m256i delta256 = _mm256_set1_epi8(deltaI);
 		__m256i zeroI = _mm256_setzero_si256();
 
-		int16_t* activeFineBucket = AI_FarmersFarmHotBuckets[AI_FarmersFarmFineTimerBucket];
+		int8_t* activeFineBucket = AI_FarmersFarmHotBuckets[AI_FarmersFarmFineTimerBucket];
 
 		// We only do the farmers that were already in the farm array before this tick
-		for (uint32_t i = 0; i < previousFarmerFarmCount; i+=16)
+		for (uint32_t i = 0; i < previousFarmerFarmCount; i+=32)
 		{
 			__m256i farmerFarmTimer = _mm256_load_si256((__m256i*)(activeFineBucket + i));
-			farmerFarmTimer = _mm256_sub_epi16(farmerFarmTimer, delta256);
+			farmerFarmTimer = _mm256_sub_epi8(farmerFarmTimer, delta256);
 			_mm256_store_si256((__m256i*)(activeFineBucket + i), farmerFarmTimer);
 
-			int bitMask = (1 << math_min(previousFarmerFarmCount - i, 16)) - 1;
+			uint64_t bitMask = (1ULL << math_min(previousFarmerFarmCount - i, 32ULL)) - 1ULL;
 
 			__m256i cmpRes = _mm256_cmpgt_epi16(zeroI, farmerFarmTimer);
 			uint32_t moveMask = _mm256_movemask_epi8(cmpRes);
-			int indexMask = _pext_u32(moveMask, 0x55555555) & bitMask;
+			uint32_t indexMask = moveMask & bitMask;
 
 			if (indexMask != 0)
 			{
-				__m256i indices = _mm256_set_epi32(i, i, i, i, i, i, i, i);
-				__m256i indexAdd = simd_moveMaskToIndexMask(indexMask & 0x00FF);
-				indices = _mm256_add_epi32(indices, indexAdd);
+				for (uint32_t maskI = 0; maskI < 4; maskI++)
+				{
+					uint32_t shiftedMask = indexMask & (0x000000FF << (maskI * 8));
 
-				_mm256_storeu_si256((__m256i*)(SIMD_FarmerRemovalIndices + removedFarmerCount), indices);
-				removedFarmerCount += _mm_popcnt_u32(indexMask & 0x00FF);
+					__m256i indices = _mm256_set1_epi32(i + 8 * maskI);
+					__m256i indexAdd = simd_moveMaskToIndexMask(shiftedMask >> (maskI * 8));
+					indices = _mm256_add_epi32(indices, indexAdd);
 
-				__m256i next8Indices = _mm256_set_epi32(i + 8, i + 8, i + 8, i + 8, i + 8, i + 8, i + 8, i + 8);
-				__m256i next8IndexAdd = simd_moveMaskToIndexMask((indexMask & 0xFF00) >> 8);
-				next8Indices = _mm256_add_epi32(next8Indices, next8IndexAdd);
-
-				_mm256_storeu_si256((__m256i*)(SIMD_FarmerRemovalIndices + removedFarmerCount), next8Indices);
-				removedFarmerCount += _mm_popcnt_u32(indexMask & 0xFF00);
+					_mm256_storeu_si256((__m256i*)(SIMD_FarmerRemovalIndices + removedFarmerCount), indices);
+					removedFarmerCount += _mm_popcnt_u32(shiftedMask);
+				}
 			}
 		}
 
@@ -639,7 +629,7 @@ void game_init(Game_InstanceBuffer* buffer)
 
 	for (uint32_t i = 0; i < AI_FarmerFarmBucketCount; i++)
 	{
-		AI_FarmersFarmHotBuckets[i] = (int16_t*)_mm_malloc(sizeof(int16_t) * AI_FarmerCount, 64);
+		AI_FarmersFarmHotBuckets[i] = (int8_t*)_mm_malloc(sizeof(int8_t) * AI_FarmerCount, 64);
 		AI_FarmersFarmHotBucketIndices[i] = (uint32_t*)_mm_malloc(sizeof(uint32_t) * AI_FarmerCount, 64);
 	}
 
@@ -649,7 +639,7 @@ void game_init(Game_InstanceBuffer* buffer)
 
 	for (uint32_t i = 0; i < AI_FarmerFarmBucketCount; i++)
 	{
-		AI_FarmersSearchHotBuckets[i] = (int16_t*)_mm_malloc(sizeof(int16_t) * AI_FarmerCount, 64);
+		AI_FarmersSearchHotBuckets[i] = (int8_t*)_mm_malloc(sizeof(int8_t) * AI_FarmerCount, 64);
 		AI_FarmersSearchHotBucketIndices[i] = (uint32_t*)_mm_malloc(sizeof(uint32_t) * AI_FarmerCount, 64);
 	}
 	AI_FarmersSearchGenX = (uint16_t*)_mm_malloc(sizeof(uint16_t) * AI_FarmerCount, 64);
