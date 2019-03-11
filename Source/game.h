@@ -4,11 +4,12 @@
 
 #define PROFILE_MODE
 
-#define GAME_MAX_INSTANCE_COUNT 50000000
+#define GAME_MAX_INSTANCE_COUNT 3000000
 
 typedef struct
 {
-	int16_t spriteIndicesAndScales[GAME_MAX_INSTANCE_COUNT * 2];
+	uint8_t spriteIndices[GAME_MAX_INSTANCE_COUNT];
+	uint16_t scales[GAME_MAX_INSTANCE_COUNT];
 	uint16_t positionX[GAME_MAX_INSTANCE_COUNT];
 	uint16_t positionY[GAME_MAX_INSTANCE_COUNT];
 } Game_InstanceBuffer;

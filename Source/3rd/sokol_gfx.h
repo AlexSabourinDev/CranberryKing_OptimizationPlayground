@@ -718,10 +718,13 @@ typedef enum sg_vertex_format {
     SG_VERTEXFORMAT_FLOAT2,
     SG_VERTEXFORMAT_FLOAT3,
     SG_VERTEXFORMAT_FLOAT4,
+	SG_VERTEXFORMAT_UBYTE,
+	SG_VERTEXFORMAT_BYTE2N,
     SG_VERTEXFORMAT_BYTE4,
     SG_VERTEXFORMAT_BYTE4N,
     SG_VERTEXFORMAT_UBYTE4,
     SG_VERTEXFORMAT_UBYTE4N,
+	SG_VERTEXFORMAT_USHORTN,
     SG_VERTEXFORMAT_SHORT2,
     SG_VERTEXFORMAT_SHORT2N,
     SG_VERTEXFORMAT_SHORT4,
@@ -1430,6 +1433,7 @@ typedef struct sg_vertex_attr_desc {
     int sem_index;
     int buffer_index;
     int offset;
+	int stride;
     sg_vertex_format format;
 } sg_vertex_attr_desc;
 
@@ -1717,10 +1721,13 @@ _SOKOL_PRIVATE int _sg_vertexformat_bytesize(sg_vertex_format fmt) {
         case SG_VERTEXFORMAT_FLOAT2:    return 8;
         case SG_VERTEXFORMAT_FLOAT3:    return 12;
         case SG_VERTEXFORMAT_FLOAT4:    return 16;
+		case SG_VERTEXFORMAT_UBYTE:     return 1;
+		case SG_VERTEXFORMAT_BYTE2N:    return 2;
         case SG_VERTEXFORMAT_BYTE4:     return 4;
         case SG_VERTEXFORMAT_BYTE4N:    return 4;
         case SG_VERTEXFORMAT_UBYTE4:    return 4;
         case SG_VERTEXFORMAT_UBYTE4N:   return 4;
+		case SG_VERTEXFORMAT_USHORTN:   return 2;
         case SG_VERTEXFORMAT_SHORT2:    return 4;
         case SG_VERTEXFORMAT_SHORT2N:   return 4;
         case SG_VERTEXFORMAT_SHORT4:    return 8;
@@ -2045,15 +2052,18 @@ _SOKOL_PRIVATE GLenum _sg_gl_shader_stage(sg_shader_stage stage) {
 
 _SOKOL_PRIVATE GLint _sg_gl_vertexformat_size(sg_vertex_format fmt) {
     switch (fmt) {
-        case SG_VERTEXFORMAT_HALF:    return 1;
+        case SG_VERTEXFORMAT_HALF:      return 1;
         case SG_VERTEXFORMAT_FLOAT:     return 1;
         case SG_VERTEXFORMAT_FLOAT2:    return 2;
         case SG_VERTEXFORMAT_FLOAT3:    return 3;
         case SG_VERTEXFORMAT_FLOAT4:    return 4;
+		case SG_VERTEXFORMAT_UBYTE:     return 1;
+		case SG_VERTEXFORMAT_BYTE2N:    return 2;
         case SG_VERTEXFORMAT_BYTE4:     return 4;
         case SG_VERTEXFORMAT_BYTE4N:    return 4;
         case SG_VERTEXFORMAT_UBYTE4:    return 4;
         case SG_VERTEXFORMAT_UBYTE4N:   return 4;
+		case SG_VERTEXFORMAT_USHORTN:   return 1;
         case SG_VERTEXFORMAT_SHORT2:    return 2;
         case SG_VERTEXFORMAT_SHORT2N:   return 2;
         case SG_VERTEXFORMAT_SHORT4:    return 4;
@@ -2072,9 +2082,11 @@ _SOKOL_PRIVATE GLenum _sg_gl_vertexformat_type(sg_vertex_format fmt) {
         case SG_VERTEXFORMAT_FLOAT3:
         case SG_VERTEXFORMAT_FLOAT4:
             return GL_FLOAT;
+		case SG_VERTEXFORMAT_BYTE2N:
         case SG_VERTEXFORMAT_BYTE4:
         case SG_VERTEXFORMAT_BYTE4N:
             return GL_BYTE;
+		case SG_VERTEXFORMAT_UBYTE:
         case SG_VERTEXFORMAT_UBYTE4:
         case SG_VERTEXFORMAT_UBYTE4N:
             return GL_UNSIGNED_BYTE;
@@ -2083,6 +2095,8 @@ _SOKOL_PRIVATE GLenum _sg_gl_vertexformat_type(sg_vertex_format fmt) {
         case SG_VERTEXFORMAT_SHORT4:
         case SG_VERTEXFORMAT_SHORT4N:
             return GL_SHORT;
+		case SG_VERTEXFORMAT_USHORTN:
+			return GL_UNSIGNED_SHORT;
         case SG_VERTEXFORMAT_UINT10_N2:
             return GL_UNSIGNED_INT_2_10_10_10_REV;
         default:
@@ -2092,8 +2106,10 @@ _SOKOL_PRIVATE GLenum _sg_gl_vertexformat_type(sg_vertex_format fmt) {
 
 _SOKOL_PRIVATE GLboolean _sg_gl_vertexformat_normalized(sg_vertex_format fmt) {
     switch (fmt) {
+		case SG_VERTEXFORMAT_BYTE2N:
         case SG_VERTEXFORMAT_BYTE4N:
         case SG_VERTEXFORMAT_UBYTE4N:
+		case SG_VERTEXFORMAT_USHORTN:
         case SG_VERTEXFORMAT_SHORT2N:
         case SG_VERTEXFORMAT_SHORT4N:
         case SG_VERTEXFORMAT_UINT10_N2:
@@ -3382,7 +3398,7 @@ _SOKOL_PRIVATE void _sg_create_pipeline(_sg_pipeline* pip, _sg_shader* shd, cons
             else {
                 gl_attr->divisor = (int8_t) step_rate;
             }
-            gl_attr->stride = (uint8_t) l_desc->stride;
+            gl_attr->stride = (uint8_t) a_desc->stride;
             gl_attr->offset = use_auto_offset ? auto_offset[a_desc->buffer_index] : a_desc->offset;
             gl_attr->size = (uint8_t) _sg_gl_vertexformat_size(a_desc->format);
             gl_attr->type = _sg_gl_vertexformat_type(a_desc->format);
@@ -8259,7 +8275,7 @@ _SOKOL_PRIVATE bool _sg_validate_pipeline_desc(const sg_pipeline_desc* desc) {
             if (l_desc->stride == 0) {
                 continue;
             }
-            SOKOL_VALIDATE((l_desc->stride & 3) == 0, _SG_VALIDATE_PIPELINEDESC_LAYOUT_STRIDE4);
+            //SOKOL_VALIDATE((l_desc->stride & 3) == 0, _SG_VALIDATE_PIPELINEDESC_LAYOUT_STRIDE4);
         }
         SOKOL_VALIDATE(desc->layout.attrs[0].format != SG_VERTEXFORMAT_INVALID, _SG_VALIDATE_PIPELINEDESC_NO_ATTRS);
         bool attrs_cont = true;

@@ -49,8 +49,8 @@ void core_init(void)
 
 	sg_buffer instanceBuffer = sg_make_buffer(&(sg_buffer_desc)
 	{
-		.size = sizeof(float) * GAME_MAX_INSTANCE_COUNT * 2 + sizeof(int16_t) * GAME_MAX_INSTANCE_COUNT * 2,
-			.usage = SG_USAGE_STREAM
+		.size = sizeof(Game_InstanceBuffer),
+		.usage = SG_USAGE_STREAM
 	});
 
 	uint16_t indices[] = { 0, 1, 2, 2, 1, 3 };
@@ -94,12 +94,13 @@ void core_init(void)
 	{
 		.layout =
 		{
-			.buffers[0] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE,.stride = sizeof(float) * 2 + sizeof(int16_t) * 2 },
+			.buffers[0] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE },
 			.attrs =
 				{
-					[0] = {.name = "spriteAndScale",.format = SG_VERTEXFORMAT_SHORT2N, .offset = offsetof(Game_InstanceBuffer, spriteIndicesAndScales) },
-					[1] = {.name = "positionX",.format = SG_VERTEXFORMAT_HALF, .offset = offsetof(Game_InstanceBuffer, positionX) },
-					[2] = {.name = "positionY",.format = SG_VERTEXFORMAT_HALF, .offset = offsetof(Game_InstanceBuffer, positionY) }
+					[0] = {.name = "sprite",.format = SG_VERTEXFORMAT_UBYTE, .offset = offsetof(Game_InstanceBuffer, spriteIndices), .stride=sizeof(uint8_t), .buffer_index=0 },
+					[1] = {.name = "scale",.format = SG_VERTEXFORMAT_USHORTN,.offset = offsetof(Game_InstanceBuffer, scales),.stride = sizeof(uint16_t), .buffer_index = 0 },
+					[2] = {.name = "positionX",.format = SG_VERTEXFORMAT_HALF, .offset = offsetof(Game_InstanceBuffer, positionX),.stride = sizeof(uint16_t), .buffer_index = 0 },
+					[3] = {.name = "positionY",.format = SG_VERTEXFORMAT_HALF, .offset = offsetof(Game_InstanceBuffer, positionY),.stride = sizeof(uint16_t), .buffer_index = 0 }
 				}
 		},
 			.shader = shader,
@@ -138,11 +139,14 @@ void core_frame(void)
 	int height = sapp_height();
 
 	uint64_t delta = stm_laptime(&Time_LastFrame);
-	game_tick((float)stm_sec(delta));
+
+	float d = (float)stm_sec(delta);
+	game_tick(d < 0.016f ? d : 0.016f);
 
 	uint32_t instanceCount = game_gen_instance_buffer(Render_InstanceBuffer);
 
-	sg_update_buffer(Render_DrawState.vertex_buffers[0], Render_InstanceBuffer, sizeof(float) * instanceCount * 4);
+	sg_update_buffer(Render_DrawState.vertex_buffers[0], Render_InstanceBuffer, sizeof(Game_InstanceBuffer));
+
 
 	sg_pass_action passAction =
 	{
@@ -157,6 +161,7 @@ void core_frame(void)
 	}
 	sg_end_pass();
 	sg_commit();
+
 }
 
 void core_cleanup(void)
@@ -259,7 +264,8 @@ sapp_desc sokol_main(int argc, char* argv[])
 const char* Render_VS =
 "#version 330\n"
 "uniform float aspect;\n"
-"in vec2 spriteAndScale;\n"
+"in float sprite;\n"
+"in float scale;\n"
 "in float positionX;\n"
 "in float positionY;\n"
 "out vec2 uv;\n"
@@ -268,8 +274,8 @@ const char* Render_VS =
 "  vec2 position = vec2(positionX, positionY);\n"
 "  const float kImageCount = 11.0;\n"
 "  vec2 vertexPos = vec2(gl_VertexID / 2, gl_VertexID & 1);\n"
-"  gl_Position = vec4((position + vertexPos * spriteAndScale.y / vec2(aspect, 1.0)), 0.0, 1.0);\n"
-"  uv = vec2(vertexPos.x / kImageCount + (spriteAndScale.x * 11.0) / kImageCount, 1.0 - vertexPos.y);\n"
+"  gl_Position = vec4((position + vertexPos * scale / vec2(aspect, 1.0)), 0.0, 1.0);\n"
+"  uv = vec2(vertexPos.x / kImageCount + sprite / kImageCount, 1.0 - vertexPos.y);\n"
 "}\n";
 
 const char* Render_FS =
