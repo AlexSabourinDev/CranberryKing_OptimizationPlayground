@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#define PROFILE_MODE
+// #define PROFILE_MODE
 
 #define GAME_MAX_INSTANCE_COUNT 3000000
 

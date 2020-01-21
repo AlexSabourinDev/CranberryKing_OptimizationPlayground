@@ -135,11 +135,11 @@ typedef struct
 } Field_CropDrawCommand;
 
 static uint32_t Field_CropDrawCommandCount = 0;
-static Field_CropDrawCommand* Field_CropDrawCommands = NULL;
+static Field_CropDrawCommand* restrict Field_CropDrawCommands = NULL;
 
 static uint32_t Field_CropCount = 0;
-static Field_Crop* Field_Crops = NULL;
-static int16_t* Field_CropLifetimes = NULL;
+static Field_Crop* restrict Field_Crops = NULL;
+static int16_t* restrict Field_CropLifetimes = NULL;
 
 typedef struct
 {
@@ -156,11 +156,11 @@ uint8_t Field_ImageTable[] =
 };
 
 static uint32_t Field_TileDrawCommandCount = 0;
-static Field_TileDrawCommand* Field_TileDrawCommands = NULL;
+static Field_TileDrawCommand* restrict Field_TileDrawCommands = NULL;
 
 #define Field_Width 1000
 #define Field_Height 1000
-static uint8_t* Field_Tiles = NULL;
+static uint8_t* restrict Field_Tiles = NULL;
 
 const uint16_t Field_TileScale = (uint16_t)((2.0f / Field_Width) * UINT16_MAX);
 
@@ -258,35 +258,35 @@ const int16_t AI_FarmerFarmSpeedMax = 5 * AI_TimePrecision;
 #define AI_FarmerCount 1000000
 
 static uint32_t AI_FarmerMoveCount = 0;
-static uint16_t* AI_FarmersMoveHotX = NULL;
-static uint16_t* AI_FarmersMoveHotY = NULL;
-static uint32_t* AI_FarmersMoveCold = NULL;
-static uint16_t* AI_FarmersMoveGenX = NULL;
-static uint16_t* AI_FarmersMoveGenY = NULL;
+static uint16_t* restrict AI_FarmersMoveHotX = NULL;
+static uint16_t* restrict AI_FarmersMoveHotY = NULL;
+static uint32_t* restrict AI_FarmersMoveCold = NULL;
+static uint16_t* restrict AI_FarmersMoveGenX = NULL;
+static uint16_t* restrict AI_FarmersMoveGenY = NULL;
 
 static uint32_t AI_FarmerFarmCount = 0;
 
 #define AI_FarmerFarmBucketCount 6
-static int8_t* AI_FarmersFarmHotBuckets[AI_FarmerFarmBucketCount] = { NULL };
-static uint32_t* AI_FarmersFarmHotBucketIndices[AI_FarmerFarmBucketCount] = { NULL };
+static int8_t* restrict AI_FarmersFarmHotBuckets[AI_FarmerFarmBucketCount] = { NULL };
+static uint32_t* restrict AI_FarmersFarmHotBucketIndices[AI_FarmerFarmBucketCount] = { NULL };
 static int32_t AI_FarmersFarmHotBucketCounts[AI_FarmerFarmBucketCount] = { 0 };
 static int8_t AI_FarmersFarmBucketTransitionTimer = 0;
 static uint32_t AI_FarmersFarmFineTimerBucket = 0;
 
-static uint32_t* AI_FarmersFarmCold = NULL;
-static uint16_t* AI_FarmersFarmGenX = NULL;
-static uint16_t* AI_FarmersFarmGenY = NULL;
+static uint32_t* restrict AI_FarmersFarmCold = NULL;
+static uint16_t* restrict AI_FarmersFarmGenX = NULL;
+static uint16_t* restrict AI_FarmersFarmGenY = NULL;
 static uint32_t AI_FarmerSearchCount = 0;
 
 #define AI_FarmerSearchBucketCount 6
-static int8_t* AI_FarmersSearchHotBuckets[AI_FarmerSearchBucketCount] = { NULL };
-static uint32_t* AI_FarmersSearchHotBucketIndices[AI_FarmerSearchBucketCount] = { NULL };
+static int8_t* restrict AI_FarmersSearchHotBuckets[AI_FarmerSearchBucketCount] = { NULL };
+static uint32_t* restrict AI_FarmersSearchHotBucketIndices[AI_FarmerSearchBucketCount] = { NULL };
 static int32_t AI_FarmersSearchHotBucketCounts[AI_FarmerSearchBucketCount] = { 0 };
 static int8_t AI_FarmersSearchBucketTransitionTimer = 0;
 static uint32_t AI_FarmersSearchFineTimerBucket = 0;
 
-static uint16_t* AI_FarmersSearchGenX = NULL;
-static uint16_t* AI_FarmersSearchGenY = NULL;
+static uint16_t* restrict AI_FarmersSearchGenX = NULL;
+static uint16_t* restrict AI_FarmersSearchGenY = NULL;
 
 void ai_tick(float delta)
 {
@@ -301,7 +301,7 @@ void ai_tick(float delta)
 		__m256i delta256 = _mm256_set1_epi8(deltaI);
 		__m256i zeroI = _mm256_setzero_si256();
 
-		int8_t* activeFineBucket = AI_FarmersSearchHotBuckets[AI_FarmersSearchFineTimerBucket];
+		int8_t* restrict activeFineBucket = AI_FarmersSearchHotBuckets[AI_FarmersSearchFineTimerBucket];
 
 		uint32_t farmerCount = AI_FarmersSearchHotBucketCounts[AI_FarmersSearchFineTimerBucket];
 		uint32_t removedFarmerCount = 0;
@@ -333,7 +333,7 @@ void ai_tick(float delta)
 			}
 		}
 
-		uint32_t* activeBucketIndices = AI_FarmersSearchHotBucketIndices[AI_FarmersSearchFineTimerBucket];
+		uint32_t* restrict activeBucketIndices = AI_FarmersSearchHotBucketIndices[AI_FarmersSearchFineTimerBucket];
 
 		uint32_t tileIndex1 = rand_range(0U, Field_Width * Field_Height);
 		uint32_t tileIndex2 = rand_range(0U, Field_Width * Field_Height);
@@ -559,7 +559,7 @@ void ai_tick(float delta)
 
 			if (newStage == FieldStage_Planted)
 			{
-				Field_Crop* crop = &Field_Crops[Field_CropCount];
+				Field_Crop* restrict crop = &Field_Crops[Field_CropCount];
 				Field_CropLifetimes[Field_CropCount] = rand_range(Crop_MinLifetime, Crop_MaxLifetime);
 				crop->cropType = rand_range(0, Crop_MaxCropType);
 				crop->tileIndex = index;
@@ -759,7 +759,7 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 	{
 		for (uint32_t i = 0; i < Field_TileDrawCommandCount; ++i)
 		{
-			Field_TileDrawCommand* command = &Field_TileDrawCommands[i];
+			Field_TileDrawCommand* restrict command = &Field_TileDrawCommands[i];
 			buffer->spriteIndices[command->writeIndex] = command->spriteIndex;
 		}
 		Field_TileDrawCommandCount = 0;
@@ -768,7 +768,7 @@ uint32_t game_gen_instance_buffer(Game_InstanceBuffer* buffer)
 	{
 		for (uint32_t i = 0; i < Field_CropDrawCommandCount; i++)
 		{
-			Field_CropDrawCommand* command = &Field_CropDrawCommands[i];
+			Field_CropDrawCommand* restrict command = &Field_CropDrawCommands[i];
 			buffer->spriteIndices[command->writeIndex] = command->spriteIndex;
 			buffer->scales[command->writeIndex] = Field_TileScale;
 			buffer->positionX[command->writeIndex] = command->posX;
